@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Unpissed app icon">
+  <defs>
+    <linearGradient id="bg" x1="80" y1="52" x2="430" y2="470" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6aa2ff"/>
+      <stop offset="1" stop-color="#4d37dd"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="160" y1="104" x2="360" y2="380" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff" stop-opacity="0.96"/>
+      <stop offset="1" stop-color="#dce8ff" stop-opacity="0.92"/>
+    </linearGradient>
+  </defs>
+  <rect x="42" y="42" width="428" height="428" rx="112" fill="#10131c"/>
+  <rect x="68" y="68" width="376" height="376" rx="96" fill="url(#bg)"/>
+  <path d="M160 148h192c18 0 32 14 32 32v32c0 22-18 40-40 40H168c-22 0-40-18-40-40v-32c0-18 14-32 32-32Z" fill="url(#shine)"/>
+  <path d="M170 244h172v64c0 59-38 100-86 100s-86-41-86-100v-64Z" fill="url(#shine)"/>
+  <path d="M206 184h100" stroke="#4e7dff" stroke-width="22" stroke-linecap="round"/>
+  <path d="M256 274c24 0 44 19 44 43s-20 43-44 43-44-19-44-43 20-43 44-43Z" fill="#4e7dff" opacity="0.9"/>
+  <path d="M372 126h24c18 0 32 14 32 32v32" stroke="#f4c861" stroke-width="22" stroke-linecap="round" fill="none"/>
+</svg>
