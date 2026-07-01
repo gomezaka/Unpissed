@@ -248,7 +248,10 @@
     return `
       <header class="header">
         <div>
-          <h1 class="logo">Unpissed<span>.</span></h1>
+          <div class="brand-lockup">
+            <img class="brand-mark" src="./assets/brand-mark.png" alt="" aria-hidden="true" />
+            <h1 class="logo">Unpissed<span>.</span></h1>
+          </div>
           <p class="tagline">Find the throne before it's too late</p>
         </div>
         <div class="header-actions">

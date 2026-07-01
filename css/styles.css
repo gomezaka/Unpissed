@@ -103,7 +103,23 @@ textarea:focus-visible {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  gap: 14px;
   padding: max(18px, env(safe-area-inset-top)) 4px 20px;
+}
+
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  object-fit: contain;
+  filter: drop-shadow(0 8px 18px rgba(0, 158, 255, 0.28));
 }
 
 .logo {
