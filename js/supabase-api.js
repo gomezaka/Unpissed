@@ -27,19 +27,19 @@
 
   function criteriaFromRow(row = {}) {
     return {
-      cleanliness: Number(row.cleanliness ?? row.avg_cleanliness ?? 4),
-      queueFactor: Number(row.queue_factor ?? row.avg_queue_factor ?? 4),
-      paperQuality: Number(row.paper_quality ?? row.avg_paper_quality ?? 4),
-      lockConfidence: Number(row.lock_confidence ?? row.avg_lock_confidence ?? 4),
-      vibe: Number(row.vibe ?? row.avg_vibe ?? 4),
-      essentials: Number(row.essentials ?? row.avg_essentials ?? 4),
-      soundSafety: Number(row.sound_safety ?? row.avg_sound_safety ?? 4)
+      cleanliness: Number(row.cleanliness ?? row.avg_cleanliness ?? 0),
+      queueFactor: Number(row.queue_factor ?? row.avg_queue_factor ?? 0),
+      paperQuality: Number(row.paper_quality ?? row.avg_paper_quality ?? 0),
+      lockConfidence: Number(row.lock_confidence ?? row.avg_lock_confidence ?? 0),
+      vibe: Number(row.vibe ?? row.avg_vibe ?? 0),
+      essentials: Number(row.essentials ?? row.avg_essentials ?? 0),
+      soundSafety: Number(row.sound_safety ?? row.avg_sound_safety ?? 0)
     };
   }
 
   function ratingFromCriteria(criteria) {
-    const values = Object.values(criteria).map(Number).filter((n) => Number.isFinite(n));
-    if (!values.length) return 4;
+    const values = Object.values(criteria).map(Number).filter((n) => Number.isFinite(n) && n > 0);
+    if (!values.length) return 0;
     return values.reduce((sum, value) => sum + value, 0) / values.length;
   }
 
@@ -50,7 +50,7 @@
   function tagList(row = {}) {
     const tags = [];
     if (row.access_note) tags.push(...String(row.access_note).split('·').map((v) => v.trim()).filter(Boolean));
-    if (row.access_mode && !tags.some((tag) => tag.toLowerCase().includes('code'))) {
+    if (row.access_mode && !tags.length) {
       const mode = normalizeAccessMode(row.access_mode);
       if (mode === 'no-code') tags.push('No code');
       if (mode === 'code-needed') tags.push('Code needed');
@@ -61,20 +61,28 @@
     return tags.slice(0, 3).length ? tags.slice(0, 3) : ['Needs ratings'];
   }
 
+  function hashPercent(input, min, max) {
+    const value = String(input || 'unpissed').split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
+    return min + (value % (max - min));
+  }
+
   function mapBathroom(row = {}) {
     const criteria = criteriaFromRow(row);
     const rating = Number(row.overall_rating ?? row.average_rating ?? ratingFromCriteria(criteria));
     const facilities = Array.isArray(row.facilities) ? row.facilities : [];
+    const photos = Array.isArray(row.photos) ? row.photos.filter(Boolean) : [];
     const tags = tagList(row);
     const access = row.access_note || tags.join(' · ') || 'Access unknown';
     return {
       id: row.id,
       name: row.name || 'Unnamed throne',
       rating,
-      distanceMinutes: Number(row.distance_minutes_demo ?? row.distance_minutes ?? 4),
-      distanceMiles: Number(row.distance_miles_demo ?? row.distance_miles ?? 0.2),
-      x: Number(row.map_x ?? 50),
-      y: Number(row.map_y ?? 50),
+      lat: row.lat === null || row.lat === undefined ? null : Number(row.lat),
+      lng: row.lng === null || row.lng === undefined ? null : Number(row.lng),
+      distanceMinutes: Number(row.distance_minutes ?? 0),
+      distanceMiles: Number(row.distance_miles ?? 0),
+      x: Number(row.map_x ?? hashPercent(row.id || row.name, 18, 78)),
+      y: Number(row.map_y ?? hashPercent(`${row.name || row.id}-y`, 26, 76)),
       tags,
       status: String(row.status || (row.moderation_status === 'pending' ? 'NEW' : 'OPEN')).toUpperCase(),
       access,
@@ -82,12 +90,45 @@
       openNow: row.is_open_now !== false,
       type: row.type || 'Other',
       facilities,
-      photoCount: Number(row.photo_count ?? 0),
+      photoCount: Number(row.photo_count ?? photos.length ?? 0),
+      photos,
       vibeTags: Array.isArray(row.vibe_tags) ? row.vibe_tags : facilities.slice(0, 3),
-      crowdLevel: row.crowd_level || 'Needs more check-ins',
+      crowdLevel: row.crowd_level || (Number(row.rating_count || 0) ? `${row.rating_count} ratings` : 'Needs more check-ins'),
       criteria,
       remote: true
     };
+  }
+
+  function normalizeCheckin(row = {}) {
+    const ratingRow = Array.isArray(row.ratings) ? row.ratings[0] : row.ratings;
+    const bathroom = Array.isArray(row.bathrooms) ? row.bathrooms[0] : row.bathrooms;
+    const criteria = criteriaFromRow(ratingRow || {});
+    return {
+      id: row.id,
+      bathroomId: row.bathroom_id,
+      bathroomName: bathroom?.name || row.bathroom_name || 'Unknown bathroom',
+      rating: Number(ratingRow?.overall ?? ratingFromCriteria(criteria)),
+      criteria,
+      comment: row.comment || '',
+      anonymous: Boolean(row.anonymous),
+      createdAt: row.created_at
+    };
+  }
+
+  function initials(name = '') {
+    return String(name || 'UP').trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'UP';
+  }
+
+  function feedText(row = {}) {
+    const payload = row.payload || {};
+    const actor = row.profiles?.display_name || 'Someone discreet';
+    const bathroom = row.bathrooms?.name || payload.bathroomName || 'a bathroom';
+    const badge = row.badges?.title || payload.badgeTitle || 'a badge';
+    if (row.event_type === 'badge') return `<b>${actor}</b> unlocked <b class="gold-text">${badge}</b>`;
+    if (row.event_type === 'bathroom_added') return `<b>${actor}</b> added <b>${bathroom}</b> to the map`;
+    if (row.event_type === 'trending') return `<b>${bathroom}</b> is trending tonight`;
+    if (row.event_type === 'review') return `<b>${actor}</b> reviewed <b>${bathroom}</b>`;
+    return `<b>${actor}</b> checked in at <b>${bathroom}</b>`;
   }
 
   async function getSession() {
@@ -164,6 +205,111 @@
     return (data || []).map(mapBathroom);
   }
 
+  async function listBadges() {
+    const supabase = getClient();
+    if (!supabase) return [];
+    const { data, error } = await supabase
+      .from('badges')
+      .select('*')
+      .order('title', { ascending: true });
+    if (error) throw error;
+    return data || [];
+  }
+
+  async function listUserBadges(userId) {
+    const supabase = getClient();
+    if (!supabase || !userId) return [];
+    const { data, error } = await supabase
+      .from('user_badges')
+      .select('badge_id, unlocked_at, badges(*)')
+      .eq('user_id', userId)
+      .order('unlocked_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  }
+
+  async function unlockBadge(userId, badgeId) {
+    const supabase = getClient();
+    if (!supabase || !userId || !badgeId) return null;
+    const { data, error } = await supabase
+      .from('user_badges')
+      .upsert({ user_id: userId, badge_id: badgeId }, { onConflict: 'user_id,badge_id' })
+      .select('*')
+      .single();
+    if (error) throw error;
+    return data;
+  }
+
+  async function listMyCheckins(userId) {
+    const supabase = getClient();
+    if (!supabase || !userId) return [];
+    const { data, error } = await supabase
+      .from('checkins')
+      .select('id,bathroom_id,anonymous,comment,created_at,bathrooms(name),ratings(overall,cleanliness,queue_factor,paper_quality,lock_confidence,vibe,essentials,sound_safety)')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (error) throw error;
+    return (data || []).map(normalizeCheckin);
+  }
+
+  async function listReviews(bathroomId) {
+    const supabase = getClient();
+    if (!supabase || !bathroomId) return [];
+    const { data, error } = await supabase
+      .from('checkins')
+      .select('id,anonymous,comment,created_at,profiles(display_name),ratings(overall)')
+      .eq('bathroom_id', bathroomId)
+      .not('comment', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    if (error) throw error;
+    return (data || [])
+      .filter((row) => String(row.comment || '').trim())
+      .map((row) => {
+        const ratingRow = Array.isArray(row.ratings) ? row.ratings[0] : row.ratings;
+        return {
+          id: row.id,
+          author: row.anonymous ? 'Anonymous relief agent' : (row.profiles?.display_name || 'Unpissed user'),
+          rating: Number(ratingRow?.overall || 0),
+          text: row.comment || '',
+          createdAt: row.created_at
+        };
+      });
+  }
+
+  async function listFeedEvents() {
+    const supabase = getClient();
+    if (!supabase) return [];
+    const { data, error } = await supabase
+      .from('feed_events')
+      .select('id,event_type,created_at,payload,profiles!feed_events_actor_id_fkey(display_name),bathrooms(name),badges(title)')
+      .order('created_at', { ascending: false })
+      .limit(30);
+    if (error) {
+      const fallback = await supabase
+        .from('feed_events')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(30);
+      if (fallback.error) throw fallback.error;
+      return (fallback.data || []).map((row) => ({
+        id: row.id,
+        initials: 'UP',
+        icon: row.event_type === 'trending' ? 'trend' : '',
+        html: feedText(row),
+        createdAt: row.created_at
+      }));
+    }
+    return (data || []).map((row) => ({
+      id: row.id,
+      initials: initials(row.profiles?.display_name),
+      icon: row.event_type === 'trending' ? 'trend' : '',
+      html: feedText(row),
+      createdAt: row.created_at
+    }));
+  }
+
   async function addBathroom(input = {}, userId) {
     const supabase = getClient();
     if (!supabase) throw new Error('Supabase is not configured.');
@@ -174,13 +320,12 @@
       access_note: input.access || 'Access unknown',
       access_mode: input.accessMode || 'unknown',
       facilities: input.facilities || [],
+      city: input.city || null,
+      lat: input.lat ?? null,
+      lng: input.lng ?? null,
       added_by: userId,
       moderation_status: 'pending',
       is_open_now: true,
-      distance_minutes_demo: input.distanceMinutes || 4,
-      distance_miles_demo: input.distanceMiles || 0.2,
-      map_x: input.x || 50,
-      map_y: input.y || 50,
       status: 'NEW',
       vibe_tags: input.vibeTags || []
     };
@@ -190,6 +335,15 @@
       .select('*')
       .single();
     if (error) throw error;
+
+    await supabase.from('feed_events').insert({
+      actor_id: userId,
+      event_type: 'bathroom_added',
+      bathroom_id: data.id,
+      visibility: 'public',
+      payload: { bathroomName: data.name }
+    });
+
     return mapBathroom(data);
   }
 
@@ -296,6 +450,12 @@
     signOut,
     ensureProfile,
     listBathrooms,
+    listBadges,
+    listUserBadges,
+    unlockBadge,
+    listMyCheckins,
+    listReviews,
+    listFeedEvents,
     addBathroom,
     createCheckin,
     reportPrivacyIssue

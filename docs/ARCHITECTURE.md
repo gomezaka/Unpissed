@@ -1,70 +1,54 @@
-# Unpissed architecture draft
-
-## Current v0.3 state
-
-The app is still static and runs fully in the browser.
-
-```text
-index.html
-  css/styles.css
-  js/data.js
-  js/app.js
-  localStorage demo state
-```
-
-No backend credentials are required yet.
-
-## Target architecture
+# Unpissed architecture v0.5
 
 ```text
 GitHub
-  -> Netlify deploy
-      -> Static PWA frontend
-      -> Netlify Functions
-          -> Supabase Auth/Postgres
-          -> Cloudflare R2 upload permissions
-
-Cloudflare R2
-  -> Original uploaded bathroom/check-in photos
-
+  ↓
+Netlify
+  ↓
+Static PWA frontend
+  ↓
 Supabase
-  -> profiles
-  -> bathrooms
-  -> checkins
-  -> ratings
-  -> photos metadata
-  -> badges
-  -> feed_events
-  -> reports
+  - Auth
+  - Postgres
+  - Storage
 ```
 
-## Privacy defaults
+## Data source
 
-Unpissed should not show exact real-time bathroom activity by default.
+Supabase is the only data source.
 
-Recommended defaults:
+Removed from v0.5:
 
-- anonymous check-in enabled
-- feed activity delayed
-- exact bathroom location hidden from friends in real time
-- photo moderation required before public display
-- privacy report button on every bathroom/photo context
+- localStorage demo adapter
+- fake bathroom fallback
+- fake feed/reviews/friends
+- static `js/data.js`
 
-## Image policy
+## Frontend files
 
-Photo upload rule:
+- `index.html`
+- `css/styles.css`
+- `js/config.js`
+- `js/supabase-api.js`
+- `js/app.js`
 
-> Show the vibe, not the victims. No people, no nudity, no disasters.
+## Main Supabase tables
 
-Store the original file in Cloudflare R2 and metadata in Supabase `photos`.
+- `profiles`
+- `bathrooms`
+- `checkins`
+- `ratings`
+- `photos`
+- `badges`
+- `user_badges`
+- `feed_events`
+- `reports`
 
-## Next backend step
-
-Create a small data adapter that can switch between:
+## Flow
 
 ```text
-demoLocalStorageAdapter
-supabaseAdapter
+Open app
+  → Load Supabase session
+  → Load public bathrooms/feed/badges
+  → Signed-in users can add bathrooms, check in, upload photos and report privacy issues
 ```
-
-That lets the prototype remain useful while Supabase is introduced screen by screen.

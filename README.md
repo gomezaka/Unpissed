@@ -1,57 +1,33 @@
-# Unpissed v0.4
+# Unpissed v0.6.1
 
-Static mobile-first PWA prototype for **Unpissed** with optional Supabase backend.
+Mobile-first PWA for Unpissed with Supabase-only data, real map rendering and browser geolocation.
 
-The app still works as a local demo, but v0.4 is the first version that can connect to a real Supabase project for Auth, database and image storage.
+## Stack
 
-## Included
+- Netlify + GitHub for hosting/deploy
+- Supabase Auth
+- Supabase Postgres
+- Supabase Storage bucket: `bathroom-photos`
+- Leaflet for the interactive map
+- OpenStreetMap raster tiles by default
+- Static frontend: `index.html`, `css/styles.css`, `js/app.js`
 
-- Mobile-first dark nightlife UI
-- Interactive bathroom map with selectable pins
-- Emergency Mode
-- Search and filters
-- Bathroom profile cards
-- Check-in and rating flow
-- Optional check-in photo field
-- Badges and badge progress
-- Feed and friend radar preview
-- Profile/stat page
-- Add bathroom flow
-- LocalStorage demo fallback
-- Supabase client adapter
-- Supabase Auth modal
-- Supabase database read/write support
-- Supabase Storage upload support
-- Supabase SQL schema and seed files
-- PWA manifest and service worker
-- Netlify config
+## What changed in v0.6.1
 
-## New in v0.4
+- Replaced the stylized fake map with a real Leaflet map
+- Added OpenStreetMap tile layer with attribution
+- Added browser geolocation
+- Added location status card on the home screen
+- Added distance calculation from the user's phone position
+- Added walking-time labels such as `4 min walk · 290 m`
+- Emergency Mode now sorts by nearest mapped bathroom
+- Emergency Route draws a blue line from the user's location to the selected bathroom
+- Recenter button now requests/refreshes real location
+- Add Bathroom now saves the user's current latitude/longitude when location is enabled
+- Supabase `bathrooms.lat` and `bathrooms.lng` are used as the real map coordinates
+- Added a database index for bathroom coordinates
 
-- `js/config.js` runtime config
-- `js/supabase-api.js` backend adapter
-- Login/signup modal
-- Supabase status strip: demo / ready / live / error
-- Bathroom reads from Supabase when configured
-- Check-ins and ratings can be written to Supabase
-- Bathroom submissions can be written to Supabase
-- Photo upload path moved from Cloudflare R2 placeholder to Supabase Storage for the first MVP
-- `supabase/schema.sql` updated with RLS, auth profile trigger and storage policies
-- `supabase/seed.sql` now includes demo bathroom rows
-- `docs/SUPABASE_SETUP.md`
-
-## Still not included
-
-- Real geolocation/map provider
-- Production moderation dashboard
-- Server-side badge engine
-- Full friends/follows UI
-- Real realtime feed
-- Cloudflare image optimization/CDN layer
-
-## Local testing
-
-Open the whole folder in VS Code, then run:
+## Local start
 
 ```bash
 python -m http.server 8080
@@ -63,54 +39,70 @@ Open:
 http://localhost:8080
 ```
 
-You can also run:
+Geolocation works best on the deployed Netlify HTTPS URL. Localhost normally works for development in modern browsers.
 
-```bash
-npm install
-npm run dev
+## Supabase config
+
+Edit `js/config.js`:
+
+```js
+window.UNPISSED_CONFIG = {
+  ENABLE_SUPABASE: true,
+  SUPABASE_URL: 'https://YOUR_PROJECT.supabase.co',
+  SUPABASE_ANON_KEY: 'YOUR_ANON_OR_PUBLISHABLE_KEY',
+  SUPABASE_STORAGE_BUCKET: 'bathroom-photos',
+  MAP_DEFAULT_CENTER: [59.9139, 10.7522],
+  MAP_DEFAULT_ZOOM: 14,
+  MAP_TILE_URL: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  MAP_TILE_ATTRIBUTION: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+};
 ```
 
-## Local check
-
-```bash
-npm run check
-```
+The tile URL is configurable so you can switch from OpenStreetMap's public tile server to another provider later if traffic grows.
 
 ## Supabase setup
 
-See:
+Run in Supabase SQL Editor:
+
+1. `supabase/schema.sql`
+2. `supabase/seed.sql` for default badges only
+3. Optional: `supabase/cleanup_demo_data.sql` if you previously inserted v0.4 demo bathrooms
+
+Existing bathrooms without coordinates still show in lists, but they will not appear as map pins until `lat` and `lng` are set.
+
+## Testing checklist
+
+On the Netlify mobile URL:
+
+1. Sign in
+2. Tap **Enable location**
+3. Confirm that the map recenters to your area
+4. Add a bathroom while location is enabled
+5. Confirm that it appears as a map pin
+6. Open **Emergency Mode**
+7. Start route to the nearest bathroom
+8. Confirm that distance and walking time are shown
+
+## Netlify
+
+Build command can be empty.
+
+Publish directory:
 
 ```text
-docs/SUPABASE_SETUP.md
+.
 ```
 
-Quick version:
+## Notes
 
-1. Create a Supabase project.
-2. Run `supabase/schema.sql` in SQL Editor.
-3. Run `supabase/seed.sql` in SQL Editor.
-4. Edit `js/config.js`.
-5. Set `ENABLE_SUPABASE: true`.
-6. Paste Supabase Project URL and anon public key.
-7. Start the app locally.
-8. Create a test user from the app.
+- Do not put Supabase `service_role` keys in frontend files.
+- `VITE_` variables are not required because this is still a static app without a build step.
+- Photos are uploaded to Supabase Storage and registered in the `photos` table.
+- OpenStreetMap data is free, but their public tile servers have usage limits/policies. For heavier production traffic, switch `MAP_TILE_URL` to a dedicated tile provider.
 
-## Netlify deployment
+## v0.6.1 fix
 
-1. Create a GitHub repository.
-2. Add all files in this folder to the repository.
-3. Connect the repository to Netlify.
-4. Build command can be empty.
-5. Publish directory should be `.`.
-
-The included `netlify.toml` sets the publish directory and functions directory.
-
-## Recommended next step
-
-v0.5 should focus on making Supabase the primary source of truth:
-
-- remote check-in history
-- remote profile stats
-- remote feed events
-- actual bathroom detail reviews from database
-- server-side badge unlocks
+- Bottom navigation is fixed to the bottom of the app viewport.
+- The page itself no longer scrolls on mobile; only the main content area scrolls.
+- Extra bottom padding keeps content from hiding behind the navigation bar.
+- Safe-area padding is kept for iOS/Android browser/PWA installs.

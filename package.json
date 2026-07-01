@@ -1,12 +1,18 @@
 {
   "name": "unpissed-app",
-  "version": "0.4.0",
+  "version": "0.6.1",
   "private": true,
-  "description": "Static mobile-first PWA prototype for Unpissed with optional Supabase backend.",
+  "description": "Supabase-backed mobile-first PWA for Unpissed with Leaflet map, geolocation and fixed mobile navigation.",
   "scripts": {
     "dev": "npx serve .",
-    "check": "node --check js/app.js && node --check js/data.js && node --check js/config.js && node --check js/config.example.js && node --check js/supabase-api.js && node --check netlify/functions/health.js && node --check netlify/functions/r2-upload-url.js && node --check netlify/functions/bathrooms.js && node --check netlify/functions/checkins.js && node --check netlify/functions/moderate-image.js"
+    "check": "node --check js/app.js && node --check js/config.js && node --check js/config.example.js && node --check js/supabase-api.js && node --check netlify/functions/health.js"
   },
-  "keywords": ["pwa", "netlify", "supabase", "bathroom", "check-in"],
+  "keywords": [
+    "pwa",
+    "netlify",
+    "supabase",
+    "bathroom",
+    "check-in"
+  ],
   "license": "UNLICENSED"
 }

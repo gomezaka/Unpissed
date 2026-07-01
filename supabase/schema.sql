@@ -1,5 +1,5 @@
--- Unpissed v0.4 Supabase schema.
--- Run this in Supabase SQL Editor before enabling js/config.js.
+-- Unpissed v0.6 Supabase schema.
+-- Production schema: no demo bathroom rows or local fallback.
 -- Uses Supabase Auth + Postgres + Storage.
 
 create extension if not exists pgcrypto;
@@ -71,8 +71,6 @@ create table if not exists public.bathrooms (
   vibe_tags text[] not null default '{}',
   crowd_level text,
   status text not null default 'OPEN',
-  distance_minutes_demo integer not null default 4,
-  distance_miles_demo numeric(4,2) not null default 0.2,
   map_x numeric(5,2) not null default 50,
   map_y numeric(5,2) not null default 50,
   added_by uuid references public.profiles(id) on delete set null,
@@ -85,6 +83,8 @@ drop trigger if exists bathrooms_set_updated_at on public.bathrooms;
 create trigger bathrooms_set_updated_at
 before update on public.bathrooms
 for each row execute function public.set_updated_at();
+
+create index if not exists bathrooms_lat_lng_idx on public.bathrooms (lat, lng);
 
 -- ---------- checkins and ratings ----------
 create table if not exists public.checkins (
@@ -198,14 +198,14 @@ as
 select
   b.*,
   coalesce(s.rating_count, 0) as rating_count,
-  coalesce(s.overall_rating, 4.00) as overall_rating,
-  coalesce(s.cleanliness, 4.00) as cleanliness,
-  coalesce(s.queue_factor, 4.00) as queue_factor,
-  coalesce(s.paper_quality, 4.00) as paper_quality,
-  coalesce(s.lock_confidence, 4.00) as lock_confidence,
-  coalesce(s.vibe, 4.00) as vibe,
-  coalesce(s.essentials, 4.00) as essentials,
-  coalesce(s.sound_safety, 4.00) as sound_safety,
+  coalesce(s.overall_rating, 0.00) as overall_rating,
+  coalesce(s.cleanliness, 0.00) as cleanliness,
+  coalesce(s.queue_factor, 0.00) as queue_factor,
+  coalesce(s.paper_quality, 0.00) as paper_quality,
+  coalesce(s.lock_confidence, 0.00) as lock_confidence,
+  coalesce(s.vibe, 0.00) as vibe,
+  coalesce(s.essentials, 0.00) as essentials,
+  coalesce(s.sound_safety, 0.00) as sound_safety,
   coalesce(p.photo_count, 0) as photo_count
 from public.bathrooms b
 left join public.bathroom_rating_summary s on s.bathroom_id = b.id

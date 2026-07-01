@@ -1,31 +1,20 @@
-# Supabase setup for Unpissed v0.4
+# Supabase setup for Unpissed v0.5
 
-This version can run in two modes:
+Unpissed v0.5 is Supabase-only. There is no local demo fallback.
 
-1. **Demo mode**: no backend, localStorage only.
-2. **Supabase mode**: Auth, Postgres and Storage.
+## 1. Create or open the Supabase project
 
-## 1. Create Supabase project
+Use your paid Supabase project for Unpissed.
 
-Create a Supabase project named `unpissed`.
+## 2. Run schema
 
-## 2. Run SQL
-
-Open Supabase → SQL Editor.
-
-Run:
+Open SQL Editor and run:
 
 ```text
 supabase/schema.sql
 ```
 
-Then run:
-
-```text
-supabase/seed.sql
-```
-
-The schema creates:
+This creates:
 
 - profiles
 - bathrooms
@@ -37,81 +26,68 @@ The schema creates:
 - follows
 - feed_events
 - reports
-- bathroom-photos storage bucket
-- row level security policies
+- storage bucket policies
+- bathroom_cards view
 
-## 3. Enable auth
+## 3. Add badge catalog
 
-Supabase → Authentication → Providers.
-
-Enable Email login.
-
-For local testing, you may want to disable email confirmation temporarily:
+Run:
 
 ```text
-Authentication → Sign In / Providers → Email → Confirm email = off
+supabase/seed.sql
 ```
 
-Turn it back on before public testing.
+This only adds the app's badge definitions. It does not add fake bathrooms.
 
-## 4. Configure the app
+## 4. Remove old demo bathrooms if needed
 
-Open:
+If you previously ran the v0.4 seed with fake bathrooms, run:
 
 ```text
-js/config.js
+supabase/cleanup_demo_data.sql
 ```
 
-Set:
+This removes the old demo rows:
+
+- The Fox & Barrel
+- Neon Noodle Club
+- Metro Arcade Hall
+- Civic Square Restroom
+- Velvet Basement
+
+## 5. Configure frontend
+
+Edit `js/config.js`:
 
 ```js
 window.UNPISSED_CONFIG = {
   ENABLE_SUPABASE: true,
-  SUPABASE_URL: 'https://YOUR-PROJECT-REF.supabase.co',
-  SUPABASE_ANON_KEY: 'YOUR-SUPABASE-ANON-KEY',
+  SUPABASE_URL: 'https://YOUR_PROJECT.supabase.co',
+  SUPABASE_ANON_KEY: 'YOUR_ANON_OR_PUBLISHABLE_KEY',
   SUPABASE_STORAGE_BUCKET: 'bathroom-photos'
 };
 ```
 
-You find these values in:
+## 6. Auth
+
+Enable email/password auth in Supabase Authentication.
+
+## 7. Storage
+
+The schema creates the public bucket:
 
 ```text
-Supabase → Project Settings → API
+bathroom-photos
 ```
 
-Use the `anon public` key only. Never use `service_role` in frontend code.
+Allowed upload types:
 
-## 5. Test locally
+- image/jpeg
+- image/png
+- image/webp
 
-```bash
-python -m http.server 8080
-```
-
-Open:
+Max size:
 
 ```text
-http://localhost:8080
+5 MB
 ```
-
-The app should show either:
-
-- `Demo mode` if Supabase is disabled
-- `Supabase ready` if Supabase is configured
-- `Supabase live` after sign-in
-
-## 6. What works in v0.4
-
-With Supabase enabled and a signed-in user:
-
-- create account
-- sign in
-- sign out
-- load bathrooms from Supabase
-- add bathroom to Supabase
-- create check-in
-- create rating
-- upload optional check-in photo to Supabase Storage
-- create report/privacy ticket
-- create basic feed event
-
-The app still keeps local badge progress as a frontend demo until badge logic is moved server-side.

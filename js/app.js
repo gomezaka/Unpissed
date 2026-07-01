@@ -1,59 +1,103 @@
 (() => {
-  const DATA = window.UNPISSED_DATA;
   const API = window.UnpissedSupabase;
-  const STORAGE_KEY = 'unpissed-demo-state-v4';
+
+  const CRITERIA_LABELS = {
+    cleanliness: 'Cleanliness',
+    queueFactor: 'Queue Factor',
+    paperQuality: 'Paper Quality',
+    lockConfidence: 'Lock Confidence',
+    vibe: 'Vibe',
+    essentials: 'Essentials',
+    soundSafety: 'Sound Safety'
+  };
 
   const defaultState = {
     activeTab: 'map',
-    selectedBathroomId: 'fox-barrel',
+    selectedBathroomId: null,
     modal: null,
     anonymous: true,
-    checkinBathroomId: 'fox-barrel',
+    checkinBathroomId: null,
     searchQuery: '',
     routeBathroomId: null,
     authUser: null,
     authProfile: null,
-    remoteBathrooms: [],
-    backendStatus: API?.isConfigured?.() ? 'configured' : 'demo',
-    syncMessage: API?.isConfigured?.() ? 'Supabase configured. Sign in to write data.' : 'Demo mode. Add Supabase keys in js/config.js.',
+    backendStatus: API?.isConfigured?.() ? 'ready' : 'missing',
+    syncMessage: API?.isConfigured?.() ? 'Supabase is configured. Sign in to add and rate bathrooms.' : 'Supabase configuration is missing.',
+    bathrooms: [],
     checkins: [],
-    customBathrooms: [],
-    unlockedBadges: ['emergency-landing'],
+    badges: [],
+    userBadges: [],
+    feed: [],
+    reviewsByBathroom: {},
+    loading: true,
     filters: {
       topRated: false,
       noCode: false,
       openNow: false,
       accessible: false
-    }
+    },
+    userLocation: null,
+    geoStatus: 'idle',
+    geoError: '',
+    mapHasMoved: false
   };
 
-  let state = loadState();
-
-  function loadState() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return { ...defaultState };
-      return { ...defaultState, ...JSON.parse(raw), modal: null };
-    } catch {
-      return { ...defaultState };
-    }
-  }
-
-  function persist() {
-    const { modal, activeTab, selectedBathroomId, authUser, authProfile, remoteBathrooms, backendStatus, syncMessage, ...stored } = state;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
-  }
+  let state = { ...defaultState };
+  let leafletMap = null;
+  let markerLayer = null;
+  let userMarker = null;
+  let routeLine = null;
+  let mapRenderTimer = null;
 
   function setState(patch) {
     state = { ...state, ...patch };
-    persist();
     render();
   }
 
+  function hasCoordinates(bathroom) {
+    const lat = Number(bathroom?.lat);
+    const lng = Number(bathroom?.lng);
+    return Number.isFinite(lat) && Number.isFinite(lng);
+  }
+
+  function toRad(value) {
+    return Number(value) * Math.PI / 180;
+  }
+
+  function distanceKmBetween(a, b) {
+    if (!a || !b) return null;
+    const lat1 = Number(a.lat);
+    const lon1 = Number(a.lng);
+    const lat2 = Number(b.lat);
+    const lon2 = Number(b.lng);
+    if (![lat1, lon1, lat2, lon2].every(Number.isFinite)) return null;
+    const earthKm = 6371;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const x = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return earthKm * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+  }
+
+  function walkingMinutes(distanceKm) {
+    if (!Number.isFinite(distanceKm)) return null;
+    return Math.max(1, Math.round((distanceKm / 4.8) * 60));
+  }
+
+  function applyDistance(bathroom) {
+    if (!bathroom) return bathroom;
+    if (!state.userLocation || !hasCoordinates(bathroom)) return bathroom;
+    const km = distanceKmBetween(state.userLocation, bathroom);
+    if (!Number.isFinite(km)) return bathroom;
+    return {
+      ...bathroom,
+      distanceKm: km,
+      distanceMinutes: walkingMinutes(km)
+    };
+  }
+
   function bathrooms() {
-    const remote = Array.isArray(state.remoteBathrooms) ? state.remoteBathrooms : [];
-    const base = remote.length ? remote : DATA.bathrooms;
-    return [...base, ...state.customBathrooms];
+    const rows = Array.isArray(state.bathrooms) ? state.bathrooms : [];
+    return rows.map(applyDistance);
   }
 
   function filteredBathrooms() {
@@ -82,11 +126,7 @@
   function selectedBathroom() {
     const all = bathrooms();
     const visible = filteredBathrooms();
-    return all.find((b) => b.id === state.selectedBathroomId) || visible[0] || all[0];
-  }
-
-  function photoEntriesForBathroom(bathroomId) {
-    return state.checkins.filter((checkin) => checkin.bathroomId === bathroomId && checkin.photoName).slice(-3).reverse();
+    return all.find((b) => b.id === state.selectedBathroomId) || visible[0] || all[0] || null;
   }
 
   function icon(name) {
@@ -124,17 +164,66 @@
     return Number(value || 0).toFixed(decimals);
   }
 
+  function distanceLabel(bathroom) {
+    if (!bathroom) return 'Distance unknown';
+    if (Number.isFinite(Number(bathroom.distanceKm))) {
+      const km = Number(bathroom.distanceKm);
+      const distance = km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`;
+      return `${bathroom.distanceMinutes || walkingMinutes(km)} min walk · ${distance}`;
+    }
+    if (bathroom.distanceMinutes) return `${bathroom.distanceMinutes} min walk`;
+    if (bathroom.distanceMiles) return `${bathroom.distanceMiles} mi away`;
+    if (hasCoordinates(bathroom)) return state.userLocation ? 'Distance loading' : 'On the map';
+    return 'Location missing';
+  }
+
+  function sortedByDistance(list) {
+    return [...list].sort((a, b) => {
+      const ad = Number.isFinite(Number(a.distanceKm)) ? Number(a.distanceKm) : 999999;
+      const bd = Number.isFinite(Number(b.distanceKm)) ? Number(b.distanceKm) : 999999;
+      if (ad !== bd) return ad - bd;
+      return Number(b.rating || 0) - Number(a.rating || 0);
+    });
+  }
+
+  function nearestBathroom() {
+    const visible = filteredBathrooms().filter(hasCoordinates);
+    return sortedByDistance(visible)[0] || sortedByDistance(filteredBathrooms())[0] || null;
+  }
+
   function overallFromCriteria(criteria) {
-    const values = Object.values(criteria || {}).map(Number).filter((n) => !Number.isNaN(n));
+    const values = Object.values(criteria || {}).map(Number).filter((n) => Number.isFinite(n));
     if (!values.length) return 0;
     return values.reduce((sum, n) => sum + n, 0) / values.length;
+  }
+
+  function currentDisplayName() {
+    return state.authProfile?.display_name || state.authUser?.email?.split('@')[0] || 'Unpissed user';
+  }
+
+  function initialsFromName(name = '') {
+    const parts = String(name || currentDisplayName()).trim().split(/\s+/).filter(Boolean);
+    return parts.slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'UP';
+  }
+
+  function timeAgo(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const seconds = Math.max(1, Math.floor((Date.now() - date.getTime()) / 1000));
+    if (seconds < 60) return 'now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h`;
+    const days = Math.floor(hours / 24);
+    return `${days}d`;
   }
 
   function render() {
     const app = document.querySelector('#app');
     app.innerHTML = `
       <section class="screen">
-        ${renderStatusBar()}
         <div class="scroll-area">
           ${renderHeader()}
           ${renderBackendStrip()}
@@ -146,32 +235,11 @@
       </section>
     `;
     bindEvents();
-  }
-
-  function renderStatusBar() {
-    return `
-      <div class="status-bar">
-        <span class="status-bar__time">11:47</span>
-        <div class="status-bar__right">
-          <span class="status-bar__network">5G</span>
-          <div class="signal-bars"><span></span><span></span><span></span><span></span></div>
-          <div class="battery"></div>
-        </div>
-      </div>
-    `;
-  }
-
-  function initialsFromName(name = '') {
-    const parts = String(name || DATA.user.name).trim().split(/\s+/).filter(Boolean);
-    return parts.slice(0, 2).map((part) => part[0]).join('').toUpperCase() || DATA.user.initials;
-  }
-
-  function currentDisplayName() {
-    return state.authProfile?.display_name || state.authUser?.email?.split('@')[0] || DATA.user.name;
+    queueMapRender();
   }
 
   function renderHeader() {
-    const initials = state.authUser ? initialsFromName(currentDisplayName()) : DATA.user.initials;
+    const initials = state.authUser ? initialsFromName(currentDisplayName()) : 'UP';
     return `
       <header class="header">
         <div>
@@ -181,7 +249,7 @@
         <div class="header-actions">
           <button class="icon-button" data-action="open-notifications" aria-label="Notifications">
             ${icon('bell')}
-            <span class="notification-dot" aria-hidden="true"></span>
+            ${state.feed.length ? '<span class="notification-dot" aria-hidden="true"></span>' : ''}
           </button>
           <button class="avatar" data-action="open-auth" aria-label="Account">${escapeHtml(initials)}</button>
         </div>
@@ -189,27 +257,27 @@
     `;
   }
 
-
-
   function renderBackendStrip() {
-    const configured = Boolean(API?.isConfigured?.());
     const signedIn = Boolean(state.authUser);
-    const label = configured ? (signedIn ? 'Supabase live' : 'Supabase ready') : 'Demo mode';
-    const tone = configured ? (signedIn ? 'live' : 'ready') : 'demo';
+    const missing = state.backendStatus === 'missing';
+    const tone = signedIn ? 'live' : (missing ? 'missing' : 'ready');
+    const label = signedIn ? 'Supabase live' : (missing ? 'Setup required' : 'Supabase ready');
     return `
       <section class="backend-strip backend-strip--${tone}">
         <div>
           <b>${escapeHtml(label)}</b>
           <span>${escapeHtml(state.syncMessage || '')}</span>
         </div>
-        <button class="backend-strip__button" data-action="${configured ? (signedIn ? 'sync-supabase' : 'open-auth') : 'open-backend-help'}">
-          ${configured ? (signedIn ? 'Sync' : 'Sign in') : 'Setup'}
+        <button class="backend-strip__button" data-action="${signedIn ? 'sync-supabase' : 'open-auth'}">
+          ${signedIn ? 'Sync' : 'Sign in'}
         </button>
       </section>
     `;
   }
 
   function renderActiveTab() {
+    if (state.loading) return renderLoadingState();
+    if (state.backendStatus === 'missing') return renderMissingConfigState();
     switch (state.activeTab) {
       case 'feed': return renderFeedPage();
       case 'checkin': return renderCheckinPage();
@@ -219,6 +287,28 @@
     }
   }
 
+  function renderLoadingState() {
+    return `
+      <article class="simple-card">
+        <h3>Loading Unpissed</h3>
+        <p>Connecting to Supabase.</p>
+      </article>
+    `;
+  }
+
+  function renderMissingConfigState() {
+    return `
+      <section class="content-page">
+        <h2 class="page-title">Supabase required</h2>
+        <p class="page-subtitle">This build uses Supabase only. Add your Supabase URL and anon key in <code>js/config.js</code>.</p>
+        <article class="simple-card">
+          <h3>No local fallback</h3>
+          <p>All bathrooms, ratings, check-ins, badges and feed events now come from Supabase.</p>
+        </article>
+      </section>
+    `;
+  }
+
   function renderMapPage() {
     const bathroom = selectedBathroom();
     return `
@@ -226,32 +316,31 @@
         <div>
           <div class="emergency-kicker"><span class="pulse-dot"></span>Emergency mode</div>
           <h2>I need a bathroom. Now.</h2>
-          <p>Routes you to the closest survivable throne.</p>
+          <p>Uses your location to find the closest survivable throne.</p>
         </div>
         <span class="emergency-arrow">${icon('chevron')}</span>
       </button>
 
       ${renderSearchBar()}
       ${renderFilterBar()}
+      ${renderLocationStrip()}
       <div class="section-row">
         <h2 class="section-title">Bathroom hotspots nearby</h2>
-        <span class="section-meta">${filteredBathrooms().length} visible · 0.6 mi radius</span>
+        <span class="section-meta">${filteredBathrooms().length} visible</span>
       </div>
       ${renderMap()}
       ${renderNearbyList()}
-      ${renderBathroomCard(bathroom)}
+      ${bathroom ? renderBathroomCard(bathroom) : renderNoBathroomsCard()}
       ${renderTrustCard()}
 
       <div class="section-row">
         <h2 class="section-title">Tonight around you</h2>
         <button class="section-action" data-tab="feed">See all</button>
       </div>
-      ${renderActivityCard(DATA.feed)}
+      ${renderActivityCard(state.feed)}
       ${renderBadgeTeaser()}
     `;
   }
-
-
 
   function renderRouteBanner() {
     if (!state.routeBathroomId) return '';
@@ -260,7 +349,7 @@
     return `
       <button class="route-banner" data-action="open-details" data-bathroom-id="${bathroom.id}">
         <span>${icon('route')}</span>
-        <div><b>Emergency route active</b><small>${escapeHtml(bathroom.name)} · ${bathroom.distanceMinutes} min walk</small></div>
+        <div><b>Emergency route active</b><small>${escapeHtml(bathroom.name)} · ${escapeHtml(distanceLabel(bathroom))}</small></div>
         <em>Open</em>
       </button>
     `;
@@ -274,34 +363,6 @@
         ${state.searchQuery ? '<button class="search-clear" type="button" data-action="clear-search">Clear</button>' : ''}
         <button class="search-submit" type="submit">Search</button>
       </form>
-    `;
-  }
-
-  function renderNearbyList() {
-    const visible = filteredBathrooms().slice().sort((a, b) => a.distanceMinutes - b.distanceMinutes);
-    if (!visible.length) return '';
-    return `
-      <div class="nearby-rail" aria-label="Nearby bathrooms">
-        ${visible.map((bathroom) => `
-          <button class="nearby-pill ${bathroom.id === selectedBathroom().id ? 'is-active' : ''}" data-select-bathroom="${bathroom.id}">
-            <b>${escapeHtml(bathroom.name)}</b>
-            <span>${rounded(bathroom.rating)} ★ · ${bathroom.distanceMinutes} min</span>
-          </button>
-        `).join('')}
-      </div>
-    `;
-  }
-
-  function renderTrustCard() {
-    return `
-      <article class="trust-card">
-        <div>
-          <p class="card-kicker">Photo rules</p>
-          <h3>Show the vibe, not the victims.</h3>
-          <p>No people, no nudity, no disasters. Useful photos only.</p>
-        </div>
-        <button class="secondary-button" data-action="open-add-bathroom">Add throne</button>
-      </article>
     `;
   }
 
@@ -323,39 +384,103 @@
     `;
   }
 
+  function renderNearbyList() {
+    const visible = sortedByDistance(filteredBathrooms());
+    if (!visible.length) return '';
+    return `
+      <div class="nearby-rail" aria-label="Nearby bathrooms">
+        ${visible.map((bathroom) => `
+          <button class="nearby-pill ${bathroom.id === selectedBathroom()?.id ? 'is-active' : ''}" data-select-bathroom="${bathroom.id}">
+            <b>${escapeHtml(bathroom.name)}</b>
+            <span>${rounded(bathroom.rating)} ★ · ${escapeHtml(distanceLabel(bathroom))}</span>
+          </button>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function renderTrustCard() {
+    return `
+      <article class="trust-card">
+        <div>
+          <p class="card-kicker">Photo rules</p>
+          <h3>Show the vibe, not the victims.</h3>
+          <p>No people, no nudity, no disasters. Useful photos only.</p>
+        </div>
+        <button class="secondary-button" data-action="open-add-bathroom">Add throne</button>
+      </article>
+    `;
+  }
+
+  function renderLocationStrip() {
+    const status = state.geoStatus;
+    if (status === 'ready' && state.userLocation) {
+      return `
+        <article class="location-strip location-strip--ready">
+          <span>${icon('locate')}</span>
+          <div><b>Location active</b><small>Distances and emergency route are calculated from your phone.</small></div>
+          <button data-action="recenter">Recenter</button>
+        </article>
+      `;
+    }
+    if (status === 'error') {
+      return `
+        <article class="location-strip location-strip--error">
+          <span>${icon('locate')}</span>
+          <div><b>Location unavailable</b><small>${escapeHtml(state.geoError || 'Allow location access to sort by distance.')}</small></div>
+          <button data-action="request-location">Retry</button>
+        </article>
+      `;
+    }
+    return `
+      <article class="location-strip">
+        <span>${icon('locate')}</span>
+        <div><b>Use your location</b><small>Sort bathrooms by walking distance and enable emergency routing.</small></div>
+        <button data-action="request-location">Enable</button>
+      </article>
+    `;
+  }
+
   function renderMap() {
     const visibleBathrooms = filteredBathrooms();
-    const pins = visibleBathrooms.map((bathroom) => `
-      <button
-        class="map-pin ${bathroom.id === state.selectedBathroomId ? 'is-active' : ''}"
-        style="left:${bathroom.x}%; top:${bathroom.y}%;"
-        data-select-bathroom="${bathroom.id}"
-        aria-label="Select ${escapeHtml(bathroom.name)}"
-      ><span class="star">★</span>${rounded(bathroom.rating)}</button>
-    `).join('');
-    const emptyState = visibleBathrooms.length ? '' : '<div class="map-empty">No matches. Lower your standards, temporarily.</div>';
+    const mappedCount = visibleBathrooms.filter(hasCoordinates).length;
+    const emptyText = visibleBathrooms.length
+      ? `${visibleBathrooms.length - mappedCount} bathroom${visibleBathrooms.length - mappedCount === 1 ? '' : 's'} need coordinates.`
+      : 'No bathrooms mapped yet.';
+    const emptyState = mappedCount ? '' : `<div class="map-empty">${escapeHtml(emptyText)}</div>`;
 
     return `
-      <div class="map-card" role="img" aria-label="Stylized map with nearby bathroom ratings">
-        <div class="map-water"></div>
-        <span class="road"></span><span class="road"></span><span class="road"></span><span class="road"></span><span class="road"></span>
-        <span class="you-dot" aria-label="You are here"></span>
-        ${pins}
+      <div class="map-card map-card--leaflet">
+        <div id="unpissed-map" class="leaflet-map" aria-label="Interactive map with nearby bathrooms"></div>
         ${emptyState}
         <button class="add-throne" data-action="open-add-bathroom"><span>+</span> Add this throne to the map</button>
-        <button class="recenter" data-action="recenter" aria-label="Recenter map">${icon('locate')}</button>
+        <button class="recenter" data-action="recenter" aria-label="Use current location">${icon('locate')}</button>
       </div>
+    `;
+  }
+
+  function renderNoBathroomsCard() {
+    return `
+      <article class="card selected-card">
+        <div class="selected-body empty-state">
+          <h2>No bathrooms yet</h2>
+          <p>Your Supabase database is connected, but no bathrooms are mapped. Add the first throne to start building the city.</p>
+        </div>
+        <div class="card-actions">
+          <button class="primary-button full-width" data-action="open-add-bathroom">Add first bathroom</button>
+        </div>
+      </article>
     `;
   }
 
   function renderBathroomCard(bathroom) {
     const criteriaOrder = ['cleanliness', 'queueFactor', 'paperQuality', 'lockConfidence', 'vibe'];
     const criteriaRows = criteriaOrder.map((key) => {
-      const value = bathroom.criteria[key] || 0;
+      const value = bathroom.criteria?.[key] || 0;
       const isGold = key === 'vibe' && value >= 4.8;
       return `
         <div class="rating-row">
-          <span class="rating-row__label">${DATA.criteriaLabels[key]}</span>
+          <span class="rating-row__label">${CRITERIA_LABELS[key]}</span>
           <span class="rating-track"><span class="rating-fill ${isGold ? 'is-gold' : ''}" style="width:${Math.min(value * 20, 100)}%"></span></span>
           <span class="rating-value ${isGold ? 'is-gold' : ''}">${rounded(value)}</span>
         </div>
@@ -368,11 +493,11 @@
           <div class="card-top">
             <div>
               <h2 class="bathroom-name">${escapeHtml(bathroom.name)}</h2>
-              <div class="rating-line"><span class="rating-number">${rounded(bathroom.rating)} ★</span><span class="dot-separator"></span><span>${bathroom.distanceMinutes} min walk</span></div>
+              <div class="rating-line"><span class="rating-number">${rounded(bathroom.rating)} ★</span><span class="dot-separator"></span><span>${escapeHtml(distanceLabel(bathroom))}</span></div>
             </div>
             <span class="trending-pill">${escapeHtml(bathroom.status || 'OPEN')}</span>
           </div>
-          <div class="chip-row">${bathroom.tags.map((tag) => `<span class="pill">${escapeHtml(tag)}</span>`).join('')}</div>
+          <div class="chip-row">${(bathroom.tags || []).map((tag) => `<span class="pill">${escapeHtml(tag)}</span>`).join('')}</div>
           ${renderCrowdPulse(bathroom)}
           ${renderPhotoStrip(bathroom)}
           <div class="breakdown">
@@ -389,47 +514,45 @@
     `;
   }
 
-
-
   function renderCrowdPulse(bathroom) {
     const tags = (bathroom.vibeTags || []).slice(0, 3).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('');
     return `
       <div class="crowd-pulse">
         <div><b>Live-ish pulse</b><span>${escapeHtml(bathroom.crowdLevel || 'Crowd level unknown')}</span></div>
-        <div class="vibe-tags">${tags}</div>
+        <div class="vibe-tags">${tags || '<span>Needs check-ins</span>'}</div>
       </div>
     `;
   }
 
   function renderPhotoStrip(bathroom) {
-    const uploaded = photoEntriesForBathroom(bathroom.id);
-    const placeholders = Math.max(0, Math.min(3, Number(bathroom.photoCount || 0)) - uploaded.length);
-    const uploadedCards = uploaded.map((entry) => `
-      <div class="photo-tile photo-tile--uploaded" title="${escapeHtml(entry.photoName)}">
-        ${icon('camera')}
-        <span>${escapeHtml(entry.photoName)}</span>
+    const photos = bathroom.photos || [];
+    if (!photos.length && !bathroom.photoCount) {
+      return `<div class="photo-strip" aria-label="Bathroom photos"><div class="photo-tile"><span>No photos yet</span></div></div>`;
+    }
+    const photoCards = photos.slice(0, 3).map((photo) => `
+      <div class="photo-tile photo-tile--uploaded" title="${escapeHtml(photo.storage_key || 'Bathroom photo')}">
+        ${photo.public_url ? `<img src="${escapeHtml(photo.public_url)}" alt="Bathroom photo" loading="lazy" />` : icon('camera')}
+        <span>Photo</span>
       </div>
     `).join('');
-    const placeholderCards = Array.from({ length: placeholders }, (_, index) => `
-      <div class="photo-tile"><span>Bathroom photo ${index + 1}</span></div>
-    `).join('');
-    return `
-      <div class="photo-strip" aria-label="Bathroom photos">
-        ${uploadedCards}${placeholderCards || '<div class="photo-tile"><span>No photos yet</span></div>'}
-      </div>
-    `;
+    const placeholders = Math.max(0, Math.min(3, Number(bathroom.photoCount || 0)) - photos.length);
+    const placeholderCards = Array.from({ length: placeholders }, () => `<div class="photo-tile"><span>Photo pending</span></div>`).join('');
+    return `<div class="photo-strip" aria-label="Bathroom photos">${photoCards}${placeholderCards}</div>`;
   }
 
-  function renderActivityCard(items) {
+  function renderActivityCard(items = []) {
+    if (!items.length) {
+      return `<div class="card activity-card"><div class="empty-state">No feed activity yet. Check-ins and badges will appear here.</div></div>`;
+    }
     return `
       <div class="card activity-card">
-        ${items.map((item) => `
+        ${items.slice(0, 8).map((item) => `
           <div class="activity-row">
-            <div class="mini-avatar ${item.avatar === 'teal' ? 'teal' : item.avatar === 'blue' ? 'blue' : ''}">
-              ${item.icon === 'trend' ? icon('trend') : escapeHtml(item.initials)}
+            <div class="mini-avatar ${item.avatar || ''}">
+              ${item.icon ? icon(item.icon) : escapeHtml(item.initials || 'UP')}
             </div>
-            <div class="activity-copy">${item.text}</div>
-            <span class="activity-time">${item.time}</span>
+            <div class="activity-copy">${item.html}</div>
+            <span class="activity-time">${escapeHtml(timeAgo(item.createdAt))}</span>
           </div>
         `).join('')}
       </div>
@@ -437,55 +560,36 @@
   }
 
   function renderBadgeTeaser() {
+    const unlockedIds = new Set(state.userBadges.map((item) => item.badge_id || item.id));
+    const unlockedBadge = state.badges.find((badge) => unlockedIds.has(badge.id));
+    const nextBadge = state.badges.find((badge) => !unlockedIds.has(badge.id));
+    const badge = unlockedBadge || nextBadge;
+    if (!badge) return '';
     return `
       <article class="badge-card">
         <div class="badge-medallion">${icon('pulse')}</div>
         <div>
-          <p class="badge-kicker">Badge unlocked</p>
-          <h2 class="badge-title">Emergency Landing</h2>
-          <p class="badge-quote">“Fast thinking. Faster walking.”</p>
-          <p class="badge-sub">Your family does not need to know.</p>
+          <p class="badge-kicker">${unlockedBadge ? 'Badge unlocked' : 'Next badge'}</p>
+          <h2 class="badge-title">${escapeHtml(badge.title)}</h2>
+          <p class="badge-quote">“${escapeHtml(badge.subtitle || badge.description || 'Keep exploring.')}”</p>
+          <p class="badge-sub">${unlockedBadge ? 'Your family does not need to know.' : 'Check in to make progress.'}</p>
         </div>
       </article>
     `;
   }
 
   function renderFeedPage() {
-    const personalEvents = state.checkins.slice().reverse().map((checkin, index) => ({
-      id: `checkin-${index}`,
-      initials: state.anonymous ? '??' : DATA.user.initials,
-      avatar: 'gold',
-      text: `<b>${state.anonymous ? 'Someone discreet' : DATA.user.name}</b> checked in at <b>${escapeHtml(checkin.bathroomName)}</b>${checkin.photoName ? ' · added a photo' : ''}`,
-      time: 'now'
-    }));
-    const feed = [...personalEvents, ...DATA.feed];
     return `
       <section class="content-page">
         <h2 class="page-title">Feed</h2>
         <p class="page-subtitle">Friend activity, trending thrones and questionable little victories.</p>
-        ${renderFriendRadar()}
-        ${renderActivityCard(feed)}
+        <article class="simple-card friend-radar">
+          <div class="card-kicker">Privacy by default</div>
+          <p class="privacy-note">Activity is designed for delayed, non-exact sharing. No live bathroom location is shown by default.</p>
+        </article>
+        <div style="height:12px"></div>
+        ${renderActivityCard(state.feed)}
       </section>
-    `;
-  }
-
-
-  function renderFriendRadar() {
-    return `
-      <article class="simple-card friend-radar">
-        <div class="card-kicker">Friend radar</div>
-        <p class="privacy-note">Privacy-friendly by default: delayed activity, no exact real-time bathroom location.</p>
-        <div class="friend-list">
-          ${DATA.friendRadar.map((friend) => `
-            <div class="friend-row">
-              <span class="mini-avatar teal">${escapeHtml(friend.initials)}</span>
-              <div><b>${escapeHtml(friend.name)}</b><small>${escapeHtml(friend.status)} · ${escapeHtml(friend.distance)}</small></div>
-              <em>${escapeHtml(friend.privacy)}</em>
-            </div>
-          `).join('')}
-        </div>
-      </article>
-      <div style="height:12px"></div>
     `;
   }
 
@@ -495,62 +599,41 @@
       <section class="content-page">
         <h2 class="page-title">Check In</h2>
         <p class="page-subtitle">You survived. How was it?</p>
-        ${renderBathroomCard(bathroom)}
+        ${bathroom ? renderBathroomCard(bathroom) : renderNoBathroomsCard()}
         <div style="height:14px"></div>
-        <button class="primary-button full-width" data-action="open-checkin" data-bathroom-id="${bathroom.id}">Rate the relief</button>
+        ${bathroom ? `<button class="primary-button full-width" data-action="open-checkin" data-bathroom-id="${bathroom.id}">Rate the relief</button>` : ''}
       </section>
     `;
   }
 
   function renderBadgesPage() {
-    const badges = DATA.badges.map((badge) => ({
-      ...badge,
-      unlocked: badge.unlocked || state.unlockedBadges.includes(badge.id)
-    }));
+    const unlockedIds = new Set(state.userBadges.map((item) => item.badge_id || item.id));
     return `
       <section class="content-page">
         <h2 class="page-title">Badges</h2>
-        <p class="page-subtitle">Collect proof of your most unnecessary achievements.</p>
+        <p class="page-subtitle">Small rewards for questionable commitment.</p>
         <div class="badge-grid">
-          ${badges.map((badge) => {
-            const progress = badgeProgress(badge.id);
+          ${state.badges.length ? state.badges.map((badge) => {
+            const unlocked = unlockedIds.has(badge.id);
             return `
-            <article class="badge-list-item ${badge.unlocked ? '' : 'is-locked'}">
-              <div class="badge-list-icon">${badge.unlocked ? icon('pulse') : icon('lock')}</div>
-              <div class="badge-list-copy">
-                <h3>${escapeHtml(badge.title)} ${badge.unlocked ? '<span class="gold-text">✓</span>' : '<span class="faint-text">Locked</span>'}</h3>
-                <p>${escapeHtml(badge.subtitle)}</p>
-                <p class="faint-text">${escapeHtml(badge.description)}</p>
-                <div class="badge-progress"><span style="width:${progress.percent}%"></span></div>
-                <small>${escapeHtml(progress.label)}</small>
-              </div>
-            </article>`;
-          }).join('')}
+              <article class="badge-list-item ${unlocked ? '' : 'is-locked'}">
+                <div class="badge-list-icon">${icon('badge')}</div>
+                <div class="badge-list-copy">
+                  <h3>${escapeHtml(badge.title)} ${unlocked ? '<span class="gold-text">✓</span>' : '<span class="faint-text">Locked</span>'}</h3>
+                  <p>${escapeHtml(badge.subtitle || '')}</p>
+                  <p class="faint-text">${escapeHtml(badge.description || '')}</p>
+                </div>
+              </article>
+            `;
+          }).join('') : '<div class="empty-state">No badges configured in Supabase yet.</div>'}
         </div>
       </section>
     `;
   }
 
-
-  function badgeProgress(badgeId) {
-    const checkins = state.checkins || [];
-    const unique = new Set(checkins.map((item) => item.bathroomId));
-    const sameNight = checkins.length;
-    const rules = {
-      'emergency-landing': [checkins.length >= 1 ? 1 : 0, 1, 'Complete one emergency-style check-in'],
-      'golden-flush': [unique.size, 10, `${unique.size}/10 unique bathrooms`],
-      'pub-crawl-plumber': [sameNight, 5, `${Math.min(sameNight, 5)}/5 check-ins in demo night`],
-      'porcelain-royalty': [checkins.some((item) => item.bathroomId === 'fox-barrel') ? 1 : 0, 1, 'Visit the city favorite'],
-      'hidden-gem-hunter': [state.customBathrooms.length, 1, `${Math.min(state.customBathrooms.length, 1)}/1 bathroom added`],
-      'night-watch': [0, 1, 'Check in after midnight']
-    };
-    const [value, target, label] = rules[badgeId] || [0, 1, 'Hidden rule'];
-    return { percent: Math.max(0, Math.min(100, (value / target) * 100)), label };
-  }
-
   function renderProfilePage() {
     const uniqueCount = new Set(state.checkins.map((c) => c.bathroomId)).size;
-    const badgeCount = new Set(state.unlockedBadges).size;
+    const badgeCount = new Set(state.userBadges.map((item) => item.badge_id || item.id)).size;
     const best = [...bathrooms()].sort((a, b) => b.rating - a.rating)[0];
     return `
       <section class="content-page">
@@ -560,30 +643,22 @@
           <div class="stat-card"><b>${state.checkins.length}</b><span>Check-ins</span></div>
           <div class="stat-card"><b>${uniqueCount}</b><span>Unique thrones</span></div>
           <div class="stat-card"><b>${badgeCount}</b><span>Badges</span></div>
-          <div class="stat-card"><b>${rounded(best.rating)}</b><span>Best nearby</span></div>
+          <div class="stat-card"><b>${best ? rounded(best.rating) : '—'}</b><span>Best nearby</span></div>
         </div>
         <article class="simple-card">
           <h3>${escapeHtml(currentDisplayName())}</h3>
-          <p>${state.authUser ? 'Signed in with Supabase' : 'Demo user'} · Anonymous mode ${state.anonymous ? 'on' : 'off'} · Best nearby: ${escapeHtml(best.name)}</p>
+          <p>${state.authUser ? 'Signed in with Supabase' : 'Sign in to save check-ins, photos and badge progress.'} · Anonymous mode ${state.anonymous ? 'on' : 'off'}${best ? ` · Best nearby: ${escapeHtml(best.name)}` : ''}</p>
           <div style="height:12px"></div>
-          <button class="secondary-button full-width" data-action="open-auth">${state.authUser ? 'Account settings' : 'Sign in / connect Supabase'}</button>
-        </article>
-        <div style="height:12px"></div>
-        <article class="simple-card city-card">
-          <h3>${escapeHtml(DATA.cityStats.city)} bathroom scene</h3>
-          <p>${DATA.cityStats.bathrooms} mapped thrones · Trending: ${escapeHtml(DATA.cityStats.trending)} · Busiest: ${escapeHtml(DATA.cityStats.busiest)}</p>
+          <button class="secondary-button full-width" data-action="open-auth">${state.authUser ? 'Account settings' : 'Sign in'}</button>
         </article>
         <div style="height:12px"></div>
         ${renderCheckinHistory()}
-        <div style="height:12px"></div>
-        <button class="secondary-button full-width" data-action="reset-demo">Reset demo data</button>
       </section>
     `;
   }
 
-
   function renderCheckinHistory() {
-    const items = state.checkins.slice().reverse().slice(0, 5);
+    const items = state.checkins.slice(0, 5);
     if (!items.length) {
       return `<article class="simple-card"><h3>Recent check-ins</h3><p>No check-ins yet. Your porcelain legacy starts here.</p></article>`;
     }
@@ -654,132 +729,98 @@
   }
 
   function renderEmergencyModal() {
-    const sorted = bathrooms().slice().sort((a, b) => a.distanceMinutes - b.distanceMinutes);
-    const body = `
+    const sorted = sortedByDistance(bathrooms());
+    const body = sorted.length ? `
+      ${state.userLocation ? '' : '<article class="simple-card simple-card--compact"><h3>Location needed for real distance</h3><p>Tap Enable location to sort these by walking distance.</p><button class="secondary-button full-width" data-action="request-location">Enable location</button></article>'}
       <div class="list-stack">
         ${sorted.map((bathroom, index) => `
           <article class="simple-card">
             <h3>${index === 0 ? 'Best immediate option: ' : ''}${escapeHtml(bathroom.name)}</h3>
-            <p><span class="gold-text">${rounded(bathroom.rating)} ★</span> · ${bathroom.distanceMinutes} min walk · ${escapeHtml(bathroom.access)}</p>
+            <p><span class="gold-text">${rounded(bathroom.rating)} ★</span> · ${escapeHtml(distanceLabel(bathroom))} · ${escapeHtml(bathroom.access)}</p>
             <div style="height:12px"></div>
             <button class="primary-button full-width" data-action="route-to" data-bathroom-id="${bathroom.id}">${icon('route')} Start emergency route</button>
           </article>
         `).join('')}
       </div>
-    `;
-    return renderModalShell('Emergency Mode', 'Closest survivable thrones. No judgment.', body);
-  }
-
-
-  function quickVerdict(bathroom) {
-    const rating = Number(bathroom.rating || 0);
-    if (rating >= 4.7) return 'Top-tier relief. Proceed with confidence.';
-    if (rating >= 4.2) return 'Solid choice. Dignity likely preserved.';
-    if (rating >= 3.6) return 'Acceptable backup. Keep expectations medium.';
-    return 'Emergency only. Lower standards before entering.';
+    ` : '<div class="empty-state">No bathrooms are mapped yet. Add one first.</div>';
+    return renderModalShell('Emergency Mode', 'Find the closest usable option.', body);
   }
 
   function renderCheckinModal() {
     const bathroom = bathrooms().find((b) => b.id === state.checkinBathroomId) || selectedBathroom();
-    const criteriaRows = Object.entries(DATA.criteriaLabels).map(([key, label]) => {
-      const value = bathroom.criteria?.[key] || 4;
-      return `
-        <div class="rating-input-row">
-          <label for="rating-${key}">${label}</label>
-          <input id="rating-${key}" name="${key}" type="range" min="1" max="5" step="0.1" value="${value}" data-rating-slider />
-          <output for="rating-${key}">${rounded(value)}</output>
-        </div>
-      `;
-    }).join('');
+    if (!bathroom) return renderModalShell('Check in', 'No bathroom selected.', '<div class="empty-state">Add a bathroom before checking in.</div>');
+    const criteriaRows = Object.entries(CRITERIA_LABELS).map(([key, label]) => `
+      <label class="range-row">
+        <span>${escapeHtml(label)}</span>
+        <input type="range" name="${key}" min="1" max="5" step="0.5" value="4" />
+      </label>
+    `).join('');
 
     const body = `
-      <form class="form-grid" data-form="checkin">
-        <article class="simple-card">
+      <form class="checkin-form" data-form="checkin">
+        <input type="hidden" name="bathroomId" value="${bathroom.id}" />
+        <div class="simple-card">
           <h3>${escapeHtml(bathroom.name)}</h3>
-          <p>${escapeHtml(bathroom.access)} · ${bathroom.distanceMinutes} min walk</p>
-          <div class="quick-verdict">${quickVerdict(bathroom)}</div>
-        </article>
-        ${criteriaRows}
-        <div class="form-field">
-          <label for="checkin-photo">Optional photo</label>
-          <input id="checkin-photo" name="photo" type="file" accept="image/*" />
-          <small>Demo stores only the filename. With Supabase enabled, photos upload to Supabase Storage. No people, no nudity, no chaos.</small>
+          <p>Rate the relief. Keep it useful, not gross.</p>
         </div>
-        <div class="form-field">
-          <label for="checkin-comment">Comment</label>
-          <textarea id="checkin-comment" name="comment" maxlength="160" placeholder="No soap. No hope."></textarea>
-        </div>
+        <div class="range-grid">${criteriaRows}</div>
+        <label class="form-field">
+          <span>Comment</span>
+          <textarea name="comment" rows="3" maxlength="240" placeholder="Elite mirror. Suspiciously good paper."></textarea>
+        </label>
+        <label class="form-field">
+          <span>Photo</span>
+          <input type="file" name="photo" accept="image/png,image/jpeg,image/webp" />
+          <small>Show the vibe, not the victims. No people, no nudity, no disasters.</small>
+        </label>
         <div class="toggle-row">
-          <div>
-            <span>Anonymous check-in</span>
-            <span>Share the rating, not your exact bathroom moment.</span>
-          </div>
-          <button class="switch" type="button" aria-pressed="${state.anonymous}" data-action="toggle-anonymous" aria-label="Toggle anonymous check-in"></button>
+          <div><b>Anonymous check-in</b><span>Hide your name in public activity.</span></div>
+          <button class="switch ${state.anonymous ? 'is-on' : ''}" type="button" aria-pressed="${state.anonymous}" data-action="toggle-anonymous" aria-label="Toggle anonymous check-in"></button>
         </div>
-        <button class="primary-button full-width" type="submit">Submit check-in</button>
+        <button class="primary-button full-width" type="submit">Check in on the throne</button>
       </form>
     `;
-    return renderModalShell('Rate the relief', 'You survived. How was it?', body);
+    return renderModalShell('Check In', 'You survived. How was it?', body);
   }
 
   function renderDetailsModal() {
     const bathroom = selectedBathroom();
-    const allCriteria = Object.entries(DATA.criteriaLabels).map(([key, label]) => {
-      const value = bathroom.criteria[key] || 0;
-      return `<div class="rating-row"><span class="rating-row__label">${label}</span><span class="rating-track"><span class="rating-fill" style="width:${value * 20}%"></span></span><span class="rating-value">${rounded(value)}</span></div>`;
+    if (!bathroom) return renderModalShell('Bathroom details', 'No bathroom selected.', '<div class="empty-state">No bathrooms are mapped yet.</div>');
+    const allCriteria = Object.entries(CRITERIA_LABELS).map(([key, label]) => {
+      const value = bathroom.criteria?.[key] || 0;
+      return `<div class="rating-row"><span class="rating-row__label">${escapeHtml(label)}</span><span class="rating-track"><span class="rating-fill" style="width:${Math.min(value * 20, 100)}%"></span></span><span class="rating-value">${rounded(value)}</span></div>`;
     }).join('');
+
     const body = `
       <article class="simple-card">
         <h3>${escapeHtml(bathroom.name)}</h3>
-        <p><span class="gold-text">${rounded(bathroom.rating)} ★</span> · ${bathroom.distanceMinutes} min walk · ${escapeHtml(bathroom.type)}</p>
-        <p style="margin-top:8px">${escapeHtml(bathroom.access)}</p>
-        <div class="chip-row chip-row--compact">${(bathroom.facilities || []).map((item) => `<span class="pill">${escapeHtml(item)}</span>`).join('')}</div>
+        <p><span class="gold-text">${rounded(bathroom.rating)} ★</span> · ${escapeHtml(distanceLabel(bathroom))} · ${escapeHtml(bathroom.type)}</p>
+        <div class="chip-row chip-row--compact">${(bathroom.facilities || []).map((facility) => `<span class="pill">${escapeHtml(facility)}</span>`).join('')}</div>
+        <div class="quick-verdict">${escapeHtml(bathroom.access || 'Access unknown')}</div>
       </article>
-      <div style="height:14px"></div>
-      <div class="simple-card">
-        <div class="card-kicker">Photos</div>
-        ${renderPhotoStrip(bathroom)}
-      </div>
-      <div style="height:14px"></div>
-      <div class="simple-card">
-        <div class="card-kicker">Full breakdown</div>
-        ${allCriteria}
-      </div>
-      <div style="height:14px"></div>
+      <div style="height:12px"></div>
+      <article class="simple-card"><div class="card-kicker">Full breakdown</div>${allCriteria}</article>
+      <div style="height:12px"></div>
       ${renderReviewList(bathroom.id)}
-      <div style="height:14px"></div>
-      <article class="simple-card"><h3>Access intelligence</h3><p>${escapeHtml(bathroom.crowdLevel || 'Unknown crowd level')} · ${escapeHtml((bathroom.vibeTags || []).join(' · ') || 'No vibe tags yet')}</p></article>
-      <div style="height:14px"></div>
+      <div style="height:12px"></div>
       <button class="secondary-button full-width" data-action="report-privacy">Report privacy issue</button>
       <div style="height:10px"></div>
       <button class="primary-button full-width" data-action="open-checkin" data-bathroom-id="${bathroom.id}">Check in on the throne</button>
     `;
-    return renderModalShell('Bathroom details', 'Useful facts before a questionable decision.', body);
+    return renderModalShell('Bathroom Details', 'All the dignity metrics.', body);
   }
 
-
   function renderReviewList(bathroomId) {
-    const personal = state.checkins
-      .filter((checkin) => checkin.bathroomId === bathroomId && checkin.comment)
-      .slice(-3)
-      .reverse()
-      .map((checkin) => ({
-        id: checkin.id,
-        author: checkin.anonymous ? 'Anonymous relief agent' : DATA.user.name,
-        rating: checkin.rating,
-        text: checkin.comment,
-        time: 'now'
-      }));
-    const seeded = (DATA.reviews || []).filter((review) => review.bathroomId === bathroomId);
-    const reviews = [...personal, ...seeded].slice(0, 4);
-    if (!reviews.length) return '<article class="simple-card"><h3>Reviews</h3><p>No reviews yet. Be the brave one.</p></article>';
+    const reviews = state.reviewsByBathroom[bathroomId];
+    if (!reviews) return '<article class="simple-card"><h3>Recent reviews</h3><p>Loading reviews...</p></article>';
+    if (!reviews.length) return '<article class="simple-card"><h3>Recent reviews</h3><p>No reviews yet.</p></article>';
     return `
       <article class="simple-card">
         <h3>Recent reviews</h3>
         <div class="review-list">
           ${reviews.map((review) => `
             <div class="review-row">
-              <div><b>${escapeHtml(review.author)}</b><small>${escapeHtml(review.text)}</small></div>
+              <div><b>${escapeHtml(review.author)}</b><small>${escapeHtml(review.text || 'No comment.')}</small></div>
               <span>${rounded(review.rating)} ★</span>
             </div>
           `).join('')}
@@ -790,58 +831,50 @@
 
   function renderAddBathroomModal() {
     const body = `
-      <form class="form-grid" data-form="add-bathroom">
-        <div class="form-field">
-          <label for="bathroom-name">Bathroom name</label>
-          <input id="bathroom-name" name="name" required maxlength="60" placeholder="The Secret Sink" />
+      <form class="add-form" data-form="add-bathroom">
+        <label class="form-field">
+          <span>Name</span>
+          <input name="name" required maxlength="80" placeholder="Venue or bathroom name" />
+        </label>
+        <div class="field-grid">
+          <label class="form-field"><span>Type</span><select name="type"><option>Bar</option><option>Restaurant</option><option>Café</option><option>Club</option><option>Venue</option><option>Public</option><option>Other</option></select></label>
+          <label class="form-field"><span>Access</span><select name="accessMode"><option value="public">Public</option><option value="no-code">No code</option><option value="code-needed">Code needed</option><option value="customer-only">Customer-only</option><option value="paid">Paid</option><option value="unknown">Unknown</option></select></label>
         </div>
-        <div class="form-field">
-          <label for="bathroom-type">Type</label>
-          <select id="bathroom-type" name="type">
-            <option>Bar</option>
-            <option>Restaurant</option>
-            <option>Café</option>
-            <option>Venue</option>
-            <option>Public</option>
-            <option>Other</option>
-          </select>
-        </div>
-        <div class="form-field">
-          <label for="bathroom-access">Access note</label>
-          <input id="bathroom-access" name="access" maxlength="80" placeholder="No code · Great lighting · Public-ish" />
-        </div>
-        <div class="form-field">
-          <label for="bathroom-facilities">Facilities</label>
-          <input id="bathroom-facilities" name="facilities" maxlength="120" placeholder="Accessible, soap, hooks, changing table" />
-        </div>
+        <label class="form-field">
+          <span>Access note</span>
+          <input name="access" maxlength="120" placeholder="Public-ish · No code · Great lighting" />
+        </label>
+        <label class="form-field">
+          <span>Facilities</span>
+          <input name="facilities" maxlength="180" placeholder="Accessible, Soap, Mirror, Hooks" />
+          <small>Comma-separated.</small>
+        </label>
+        <label class="form-field">
+          <span>City</span>
+          <input name="city" maxlength="80" placeholder="City" />
+        </label>
+        <article class="location-capture">
+          <div>
+            <b>Map position</b>
+            <small>${state.userLocation ? `Will save current location: ${Number(state.userLocation.lat).toFixed(5)}, ${Number(state.userLocation.lng).toFixed(5)}` : 'Enable location before adding to place the bathroom on the map.'}</small>
+          </div>
+          <button type="button" class="secondary-button" data-action="request-location">${state.userLocation ? 'Refresh' : 'Use my location'}</button>
+        </article>
         <button class="primary-button full-width" type="submit">Add this throne</button>
       </form>
     `;
-    return renderModalShell('Add this throne', 'Show the vibe, not the victims. No people, no chaos.', body);
+    return renderModalShell('Add Bathroom', 'Map a new throne for the people.', body);
   }
 
-
   function renderAuthModal() {
-    if (!API?.isConfigured?.()) {
-      const body = `
-        <article class="simple-card">
-          <h3>Supabase is not enabled yet</h3>
-          <p>Edit <b>js/config.js</b>, set <b>ENABLE_SUPABASE: true</b>, and paste your Supabase URL and anon key.</p>
-          <div style="height:12px"></div>
-          <p class="faint-text">Until then, Unpissed keeps running in demo/localStorage mode.</p>
-        </article>
-      `;
-      return renderModalShell('Backend setup', 'Demo mode is still active.', body);
-    }
-
     if (state.authUser) {
       const body = `
         <article class="simple-card">
           <h3>${escapeHtml(currentDisplayName())}</h3>
-          <p>${escapeHtml(state.authUser.email || 'Signed in user')} · connected to Supabase</p>
+          <p>${escapeHtml(state.authUser.email || '')}</p>
         </article>
         <div style="height:12px"></div>
-        <button class="primary-button full-width" data-action="sync-supabase">Sync bathrooms</button>
+        <button class="primary-button full-width" data-action="sync-supabase">Sync data</button>
         <div style="height:10px"></div>
         <button class="secondary-button full-width" data-action="sign-out">Sign out</button>
       `;
@@ -849,140 +882,103 @@
     }
 
     const body = `
-      <form class="form-grid" data-form="auth">
-        <div class="form-field">
-          <label for="auth-display-name">Display name</label>
-          <input id="auth-display-name" name="displayName" maxlength="40" placeholder="Jordan" />
-          <small>Only needed when creating a new account.</small>
-        </div>
-        <div class="form-field">
-          <label for="auth-email">Email</label>
-          <input id="auth-email" name="email" type="email" required autocomplete="email" placeholder="you@example.com" />
-        </div>
-        <div class="form-field">
-          <label for="auth-password">Password</label>
-          <input id="auth-password" name="password" type="password" required minlength="6" autocomplete="current-password" placeholder="Minimum 6 characters" />
-        </div>
+      <form class="auth-form" data-form="auth">
+        <label class="form-field"><span>Email</span><input name="email" type="email" required autocomplete="email" /></label>
+        <label class="form-field"><span>Password</span><input name="password" type="password" required autocomplete="current-password" minlength="6" /></label>
+        <label class="form-field"><span>Display name</span><input name="displayName" autocomplete="nickname" placeholder="Only needed for sign up" /></label>
         <div class="two-button-row">
-          <button class="secondary-button full-width" type="submit" name="mode" value="signup">Create account</button>
-          <button class="primary-button full-width" type="submit" name="mode" value="signin">Sign in</button>
+          <button class="primary-button" type="submit" name="mode" value="signin">Sign in</button>
+          <button class="secondary-button" type="submit" name="mode" value="signup">Create account</button>
         </div>
       </form>
     `;
-    return renderModalShell('Sign in', 'Connect your porcelain legacy to Supabase.', body);
+    return renderModalShell('Sign in', 'Save check-ins, photos and badge progress.', body);
   }
 
   function renderNotificationsModal() {
-    const body = `
-      <div class="list-stack">
-        <article class="simple-card"><h3>Badge unlocked</h3><p><b class="gold-text">Emergency Landing</b> · Fast thinking. Faster walking.</p></article>
-        <article class="simple-card"><h3>Trending nearby</h3><p>The Fox & Barrel is having a suspiciously great bathroom night.</p></article>
-      </div>
-    `;
-    return renderModalShell('Notifications', 'Tiny updates. Big relief.', body);
+    const body = state.feed.length
+      ? renderActivityCard(state.feed.slice(0, 5))
+      : '<div class="empty-state">No notifications yet.</div>';
+    return renderModalShell('Notifications', 'Recent activity from Supabase.', body);
   }
 
   function bindEvents() {
-    document.querySelectorAll('[data-tab]').forEach((button) => {
-      button.addEventListener('click', () => {
-        const tab = button.dataset.tab;
-        if (tab === 'checkin') {
-          setState({ activeTab: 'checkin', modal: 'checkin', checkinBathroomId: selectedBathroom().id });
-        } else {
-          setState({ activeTab: tab, modal: null });
-        }
+    document.querySelectorAll('[data-tab]').forEach((element) => {
+      element.addEventListener('click', () => {
+        setState({ activeTab: element.dataset.tab, modal: null });
       });
     });
 
-    document.querySelectorAll('[data-select-bathroom]').forEach((button) => {
-      button.addEventListener('click', () => {
-        setState({ selectedBathroomId: button.dataset.selectBathroom });
+    document.querySelectorAll('[data-select-bathroom]').forEach((element) => {
+      element.addEventListener('click', () => {
+        setState({ selectedBathroomId: element.dataset.selectBathroom });
       });
     });
 
     document.querySelectorAll('[data-action]').forEach((element) => {
-      element.addEventListener('click', (event) => {
-        const action = element.dataset.action;
-        if (action === 'close-modal') {
-          if (element.hasAttribute('data-modal-panel')) return;
-          setState({ modal: null });
-          return;
-        }
-        if (element.closest('[data-modal-panel]') && element.classList.contains('modal-backdrop')) return;
-        handleAction(action, element, event);
+      element.addEventListener('click', async (event) => {
+        const panel = event.target.closest('[data-modal-panel]');
+        if (element.classList.contains('modal-backdrop') && panel) return;
+        await handleAction(element, event);
       });
     });
 
-    document.querySelectorAll('[data-modal-panel]').forEach((panel) => {
-      panel.addEventListener('click', (event) => event.stopPropagation());
-    });
-
-    document.querySelectorAll('[data-rating-slider]').forEach((slider) => {
-      slider.addEventListener('input', () => {
-        const output = slider.parentElement.querySelector('output');
-        if (output) output.value = rounded(slider.value);
-      });
-    });
-
-    const searchForm = document.querySelector('[data-form="bathroom-search"]');
-    if (searchForm) {
-      searchForm.addEventListener('submit', handleSearchSubmit);
-    }
-
-    const checkinForm = document.querySelector('[data-form="checkin"]');
-    if (checkinForm) {
-      checkinForm.addEventListener('submit', handleCheckinSubmit);
-    }
-
-    const addBathroomForm = document.querySelector('[data-form="add-bathroom"]');
-    if (addBathroomForm) {
-      addBathroomForm.addEventListener('submit', handleAddBathroomSubmit);
-    }
-
-    const authForm = document.querySelector('[data-form="auth"]');
-    if (authForm) {
-      authForm.addEventListener('submit', handleAuthSubmit);
-    }
+    document.querySelectorAll('[data-form="auth"]').forEach((form) => form.addEventListener('submit', handleAuthSubmit));
+    document.querySelectorAll('[data-form="bathroom-search"]').forEach((form) => form.addEventListener('submit', handleSearchSubmit));
+    document.querySelectorAll('[data-form="checkin"]').forEach((form) => form.addEventListener('submit', handleCheckinSubmit));
+    document.querySelectorAll('[data-form="add-bathroom"]').forEach((form) => form.addEventListener('submit', handleAddBathroomSubmit));
   }
 
-  function handleAction(action, element, event) {
-    if (!action) return;
+  async function handleAction(element) {
+    const action = element.dataset.action;
     switch (action) {
+      case 'close-modal':
+        setState({ modal: null });
+        break;
       case 'open-emergency':
         setState({ modal: 'emergency' });
+        if (!state.userLocation && state.geoStatus !== 'loading') requestUserLocation({ silent: true });
         break;
       case 'open-checkin':
-        setState({ modal: 'checkin', checkinBathroomId: element.dataset.bathroomId || selectedBathroom().id });
+        if (!state.authUser) {
+          toast('Sign in required', 'Check-ins are saved to Supabase and need an account.');
+          setState({ modal: 'auth' });
+          return;
+        }
+        setState({ modal: 'checkin', checkinBathroomId: element.dataset.bathroomId || selectedBathroom()?.id });
         break;
       case 'open-details':
         setState({ modal: 'details', selectedBathroomId: element.dataset.bathroomId || state.selectedBathroomId });
+        loadReviews(element.dataset.bathroomId || state.selectedBathroomId);
         break;
       case 'open-add-bathroom':
+        if (!state.authUser) {
+          toast('Sign in required', 'Bathroom submissions need an account.');
+          setState({ modal: 'auth' });
+          return;
+        }
         setState({ modal: 'addBathroom' });
         break;
       case 'open-notifications':
         setState({ modal: 'notifications' });
         break;
       case 'open-auth':
-      case 'open-backend-help':
         setState({ modal: 'auth' });
         break;
       case 'sync-supabase':
-        syncSupabase();
+        await syncSupabase();
         break;
       case 'sign-out':
-        signOut();
+        await signOut();
         break;
       case 'toggle-anonymous':
-        state.anonymous = !state.anonymous;
-        persist();
-        element.setAttribute('aria-pressed', String(state.anonymous));
+        setState({ anonymous: !state.anonymous });
         break;
       case 'clear-search':
         setState({ searchQuery: '' });
         break;
       case 'report-privacy':
-        reportPrivacyIssue();
+        await reportPrivacyIssue();
         break;
       case 'toggle-filter': {
         const key = element.dataset.filterKey;
@@ -991,18 +987,23 @@
         setState({ filters: nextFilters });
         break;
       }
-      case 'route-to':
-        toast('Emergency route ready', 'Follow the blue line. Dignity may be restored.');
-        setState({ modal: null, selectedBathroomId: element.dataset.bathroomId || state.selectedBathroomId, routeBathroomId: element.dataset.bathroomId || state.selectedBathroomId });
+      case 'route-to': {
+        const bathroomId = element.dataset.bathroomId || state.selectedBathroomId;
+        const target = bathrooms().find((item) => item.id === bathroomId);
+        if (!target || !hasCoordinates(target)) {
+          toast('Route unavailable', 'This bathroom needs coordinates before we can route to it.');
+          return;
+        }
+        if (!state.userLocation) await requestUserLocation({ silent: true });
+        toast('Emergency route ready', state.userLocation ? 'Follow the blue line. Dignity may be restored.' : 'Location is needed for the blue line.');
+        setState({ modal: null, selectedBathroomId: bathroomId, routeBathroomId: bathroomId });
+        break;
+      }
+      case 'request-location':
+        await requestUserLocation();
         break;
       case 'recenter':
-        toast('Map recentered', 'You are still here. Stay strong.');
-        break;
-      case 'reset-demo':
-        localStorage.removeItem(STORAGE_KEY);
-        state = { ...defaultState };
-        toast('Demo reset', 'Your porcelain history has been wiped.');
-        render();
+        await requestUserLocation({ recenter: true });
         break;
       default:
         break;
@@ -1010,10 +1011,179 @@
   }
 
 
+  function queueMapRender() {
+    if (mapRenderTimer) window.clearTimeout(mapRenderTimer);
+    mapRenderTimer = window.setTimeout(updateLeafletMap, 0);
+  }
 
-  async function initSupabase() {
+  function mapDefaults() {
+    const config = window.UNPISSED_CONFIG || {};
+    const center = Array.isArray(config.MAP_DEFAULT_CENTER) ? config.MAP_DEFAULT_CENTER : [59.9139, 10.7522];
+    return {
+      center,
+      zoom: Number(config.MAP_DEFAULT_ZOOM || 14),
+      tileUrl: config.MAP_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      attribution: config.MAP_TILE_ATTRIBUTION || '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    };
+  }
+
+  function updateLeafletMap() {
+    const container = document.querySelector('#unpissed-map');
+    if (!container || state.activeTab !== 'map' || state.loading || state.backendStatus === 'missing') return;
+    if (!window.L) {
+      container.innerHTML = '<div class="map-empty">Map library did not load.</div>';
+      return;
+    }
+
+    const defaults = mapDefaults();
+    if (leafletMap && leafletMap.getContainer && leafletMap.getContainer() !== container) {
+      leafletMap.remove();
+      leafletMap = null;
+      markerLayer = null;
+      userMarker = null;
+      routeLine = null;
+    }
+
+    const selected = selectedBathroom();
+    const firstMapped = sortedByDistance(filteredBathrooms()).find(hasCoordinates);
+    const startCenter = state.userLocation
+      ? [state.userLocation.lat, state.userLocation.lng]
+      : hasCoordinates(selected)
+        ? [Number(selected.lat), Number(selected.lng)]
+        : hasCoordinates(firstMapped)
+          ? [Number(firstMapped.lat), Number(firstMapped.lng)]
+          : defaults.center;
+
+    if (!leafletMap) {
+      leafletMap = window.L.map(container, {
+        zoomControl: false,
+        attributionControl: true
+      }).setView(startCenter, defaults.zoom);
+      window.L.control.zoom({ position: 'bottomright' }).addTo(leafletMap);
+      window.L.tileLayer(defaults.tileUrl, {
+        maxZoom: 19,
+        attribution: defaults.attribution
+      }).addTo(leafletMap);
+      markerLayer = window.L.layerGroup().addTo(leafletMap);
+    }
+
+    markerLayer.clearLayers();
+    const markers = [];
+    filteredBathrooms().filter(hasCoordinates).forEach((bathroom) => {
+      const isActive = bathroom.id === selectedBathroom()?.id;
+      const marker = window.L.marker([Number(bathroom.lat), Number(bathroom.lng)], {
+        title: bathroom.name,
+        icon: window.L.divIcon({
+          className: `unpissed-leaflet-pin${isActive ? ' is-active' : ''}`,
+          html: `<span>★</span>${rounded(bathroom.rating)}`,
+          iconSize: [58, 32],
+          iconAnchor: [29, 32]
+        })
+      });
+      marker.on('click', () => setState({ selectedBathroomId: bathroom.id }));
+      marker.bindPopup(`<b>${escapeHtml(bathroom.name)}</b><br>${rounded(bathroom.rating)} ★ · ${escapeHtml(distanceLabel(bathroom))}`);
+      marker.addTo(markerLayer);
+      markers.push(marker);
+    });
+
+    if (userMarker) {
+      userMarker.remove();
+      userMarker = null;
+    }
+    if (state.userLocation) {
+      userMarker = window.L.marker([state.userLocation.lat, state.userLocation.lng], {
+        title: 'You are here',
+        icon: window.L.divIcon({
+          className: 'unpissed-user-marker',
+          html: '<span></span>',
+          iconSize: [22, 22],
+          iconAnchor: [11, 11]
+        })
+      }).addTo(leafletMap);
+    }
+
+    if (routeLine) {
+      routeLine.remove();
+      routeLine = null;
+    }
+    const routeTarget = bathrooms().find((item) => item.id === state.routeBathroomId);
+    if (state.userLocation && hasCoordinates(routeTarget)) {
+      routeLine = window.L.polyline([
+        [state.userLocation.lat, state.userLocation.lng],
+        [Number(routeTarget.lat), Number(routeTarget.lng)]
+      ], {
+        color: '#6aa2ff',
+        weight: 5,
+        opacity: 0.85,
+        dashArray: '8 9'
+      }).addTo(leafletMap);
+    }
+
+    const boundsItems = [];
+    if (state.userLocation) boundsItems.push([state.userLocation.lat, state.userLocation.lng]);
+    markers.forEach((marker) => boundsItems.push(marker.getLatLng()));
+    if (boundsItems.length >= 2 && !state.mapHasMoved) {
+      leafletMap.fitBounds(boundsItems, { padding: [36, 36], maxZoom: 16 });
+    } else if (state.userLocation && !state.mapHasMoved) {
+      leafletMap.setView([state.userLocation.lat, state.userLocation.lng], 15);
+    }
+
+    window.setTimeout(() => leafletMap?.invalidateSize?.(), 80);
+  }
+
+  async function requestUserLocation(options = {}) {
+    if (!navigator.geolocation) {
+      setState({ geoStatus: 'error', geoError: 'Geolocation is not supported on this device.' });
+      return null;
+    }
+    state = { ...state, geoStatus: 'loading', geoError: '' };
+    if (!options.silent) render();
+
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const nextLocation = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            accuracy: position.coords.accuracy,
+            updatedAt: new Date().toISOString()
+          };
+          const nearestId = sortedByDistance((state.bathrooms || []).map((bathroom) => {
+            const km = distanceKmBetween(nextLocation, bathroom);
+            return Number.isFinite(km) ? { ...bathroom, distanceKm: km, distanceMinutes: walkingMinutes(km) } : bathroom;
+          }))[0]?.id;
+          state = {
+            ...state,
+            userLocation: nextLocation,
+            geoStatus: 'ready',
+            geoError: '',
+            mapHasMoved: false,
+            selectedBathroomId: nearestId || state.selectedBathroomId,
+            syncMessage: 'Location active. Bathrooms are sorted by walking distance.'
+          };
+          render();
+          if (!options.silent) toast('Location active', 'Emergency mode can now find the nearest throne.');
+          resolve(nextLocation);
+        },
+        (error) => {
+          const message = error.code === 1
+            ? 'Location permission was denied.'
+            : error.code === 2
+              ? 'Your position is currently unavailable.'
+              : 'Location request timed out.';
+          state = { ...state, geoStatus: 'error', geoError: message };
+          render();
+          if (!options.silent) toast('Location failed', message);
+          resolve(null);
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+      );
+    });
+  }
+
+  async function initApp() {
     if (!API?.isConfigured?.()) {
-      setState({ backendStatus: 'demo', syncMessage: 'Demo mode. Add Supabase keys in js/config.js.' });
+      setState({ loading: false, backendStatus: 'missing', syncMessage: 'Add Supabase credentials in js/config.js.' });
       return;
     }
     try {
@@ -1024,35 +1194,45 @@
         ...state,
         authUser: user,
         authProfile: profile,
-        backendStatus: user ? 'live' : 'configured',
-        syncMessage: user ? 'Signed in. Loading bathrooms from Supabase.' : 'Supabase configured. Sign in to write data.'
+        backendStatus: user ? 'live' : 'ready',
+        syncMessage: user ? 'Signed in. Loading Supabase data.' : 'Supabase connected. Sign in to add and rate bathrooms.'
       };
       render();
       await syncSupabase({ silent: true });
     } catch (error) {
-      setState({ backendStatus: 'error', syncMessage: `Supabase error: ${error.message}` });
+      setState({ loading: false, backendStatus: 'error', syncMessage: `Supabase error: ${error.message}` });
     }
   }
 
   async function syncSupabase(options = {}) {
     if (!API?.isConfigured?.()) {
-      setState({ modal: 'auth' });
+      setState({ backendStatus: 'missing', syncMessage: 'Supabase configuration is missing.' });
       return;
     }
     try {
-      const remoteBathrooms = await API.listBathrooms();
+      const [remoteBathrooms, badges, feed] = await Promise.all([
+        API.listBathrooms(),
+        API.listBadges(),
+        API.listFeedEvents()
+      ]);
+      const checkins = state.authUser ? await API.listMyCheckins(state.authUser.id) : [];
+      const userBadges = state.authUser ? await API.listUserBadges(state.authUser.id) : [];
       state = {
         ...state,
-        remoteBathrooms,
-        backendStatus: state.authUser ? 'live' : 'configured',
-        syncMessage: remoteBathrooms.length ? `${remoteBathrooms.length} bathrooms loaded from Supabase.` : 'Supabase connected. No bathrooms yet; using demo data until rows exist.',
-        modal: options.keepModal ? state.modal : state.modal
+        bathrooms: remoteBathrooms,
+        badges,
+        feed,
+        checkins,
+        userBadges,
+        loading: false,
+        backendStatus: state.authUser ? 'live' : 'ready',
+        selectedBathroomId: state.selectedBathroomId || sortedByDistance(remoteBathrooms.map((item) => applyDistance(item)))[0]?.id || remoteBathrooms[0]?.id || null,
+        syncMessage: `${remoteBathrooms.length} bathrooms loaded from Supabase.`
       };
-      persist();
       render();
       if (!options.silent) toast('Supabase synced', state.syncMessage);
     } catch (error) {
-      state = { ...state, backendStatus: 'error', syncMessage: `Sync failed: ${error.message}` };
+      state = { ...state, loading: false, backendStatus: 'error', syncMessage: `Sync failed: ${error.message}` };
       render();
       toast('Sync failed', error.message);
     }
@@ -1065,12 +1245,14 @@
         ...state,
         authUser: null,
         authProfile: null,
-        backendStatus: API?.isConfigured?.() ? 'configured' : 'demo',
-        syncMessage: API?.isConfigured?.() ? 'Signed out. Demo reads still work.' : 'Demo mode.',
+        checkins: [],
+        userBadges: [],
+        backendStatus: 'ready',
+        syncMessage: 'Signed out. Public Supabase data remains visible.',
         modal: null
       };
       render();
-      toast('Signed out', 'Back to discreet demo mode.');
+      toast('Signed out', 'Public bathroom data is still available.');
     } catch (error) {
       toast('Sign out failed', error.message);
     }
@@ -1078,25 +1260,18 @@
 
   async function reportPrivacyIssue() {
     const bathroom = selectedBathroom();
-    if (API?.isConfigured?.() && state.authUser) {
-      try {
-        await API.reportPrivacyIssue({ bathroomId: bathroom.id, reason: 'privacy_issue' }, state.authUser.id);
-        toast('Report saved', 'Moderation ticket created in Supabase.');
-        return;
-      } catch (error) {
-        toast('Report failed', error.message);
-        return;
-      }
+    if (!bathroom) return;
+    try {
+      await API.reportPrivacyIssue({ bathroomId: bathroom.id, reason: 'privacy_issue' }, state.authUser?.id || null);
+      toast('Report saved', 'Moderation ticket created in Supabase.');
+    } catch (error) {
+      toast('Report failed', error.message);
     }
-    toast('Report noted', 'Demo mode only. Sign in to save reports to Supabase.');
   }
 
   async function handleAuthSubmit(event) {
     event.preventDefault();
-    if (!API?.isConfigured?.()) {
-      setState({ modal: 'auth' });
-      return;
-    }
+    if (!API?.isConfigured?.()) return;
     const submitter = event.submitter;
     const mode = submitter?.value || 'signin';
     const formData = new FormData(event.currentTarget);
@@ -1110,14 +1285,14 @@
         ? await API.signUp(email, password, displayName)
         : await API.signIn(email, password);
       const currentSession = await API.getSession();
-      const user = currentSession.user || result.session?.user || (mode === 'signin' ? result.user : null);
+      const user = currentSession.user || result.session?.user || result.user || null;
       const profile = user ? await API.ensureProfile(user, displayName) : null;
       state = {
         ...state,
         authUser: user,
         authProfile: profile,
         modal: null,
-        backendStatus: 'live',
+        backendStatus: user ? 'live' : 'ready',
         syncMessage: user ? 'Signed in. Supabase writes are active.' : 'Check your email to confirm the account, then sign in.'
       };
       render();
@@ -1143,133 +1318,116 @@
     event.preventDefault();
     const form = event.currentTarget;
     const bathroom = bathrooms().find((b) => b.id === state.checkinBathroomId) || selectedBathroom();
+    if (!bathroom || !state.authUser) return;
     const formData = new FormData(form);
     const criteria = {};
-    Object.keys(DATA.criteriaLabels).forEach((key) => {
+    Object.keys(CRITERIA_LABELS).forEach((key) => {
       criteria[key] = Number(formData.get(key));
     });
     const rating = overallFromCriteria(criteria);
     const photo = form.querySelector('input[name="photo"]')?.files?.[0];
     const checkin = {
-      id: `checkin-${Date.now()}`,
       bathroomId: bathroom.id,
       bathroomName: bathroom.name,
       criteria,
       rating,
       comment: String(formData.get('comment') || '').trim(),
-      photoName: photo ? photo.name : '',
-      anonymous: state.anonymous,
-      createdAt: new Date().toISOString()
+      anonymous: state.anonymous
     };
 
-    if (API?.isConfigured?.()) {
-      if (!state.authUser) {
-        toast('Sign in required', 'Supabase check-ins need an account.');
-        setState({ modal: 'auth' });
-        return;
-      }
-      try {
-        await API.createCheckin({ ...checkin, photo }, state.authUser.id);
-        state = { ...state, syncMessage: 'Check-in saved to Supabase.' };
-      } catch (error) {
-        toast('Supabase save failed', error.message);
-        return;
-      }
+    try {
+      await API.createCheckin({ ...checkin, photo }, state.authUser.id);
+      await updateBadgeUnlocks();
+      state = {
+        ...state,
+        modal: null,
+        activeTab: 'feed',
+        syncMessage: 'Check-in saved to Supabase.'
+      };
+      render();
+      toast('Check-in saved', 'Saved to Supabase. Your family does not need to know.');
+      await syncSupabase({ silent: true });
+    } catch (error) {
+      toast('Supabase save failed', error.message);
     }
-
-    const nextCheckins = [...state.checkins, checkin];
-    const nextBadges = updateBadges(nextCheckins);
-    state = {
-      ...state,
-      checkins: nextCheckins,
-      unlockedBadges: nextBadges,
-      modal: null,
-      activeTab: 'feed'
-    };
-    persist();
-    render();
-    toast('Check-in saved', API?.isConfigured?.() ? 'Saved to Supabase and local badge progress.' : 'Badge progress updated. Your family does not need to know.');
-    if (API?.isConfigured?.()) syncSupabase({ silent: true });
   }
 
   async function handleAddBathroomSubmit(event) {
     event.preventDefault();
+    if (!state.authUser) return;
     const formData = new FormData(event.currentTarget);
     const name = String(formData.get('name') || '').trim();
     if (!name) return;
-    const access = String(formData.get('access') || 'Access unknown').trim();
-    const id = `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}-${Date.now().toString(36)}`;
+    const access = String(formData.get('access') || '').trim();
     const facilities = String(formData.get('facilities') || '').split(',').map((item) => item.trim()).filter(Boolean);
-    const lowerAccess = access.toLowerCase();
-    const custom = {
-      id,
+    const input = {
       name,
-      rating: 4.0,
-      distanceMinutes: Math.floor(3 + Math.random() * 6),
-      distanceMiles: 0.2,
-      x: Math.floor(20 + Math.random() * 60),
-      y: Math.floor(25 + Math.random() * 55),
-      tags: access.split('·').map((tag) => tag.trim()).filter(Boolean).slice(0, 3),
-      status: 'NEW',
-      access,
-      accessMode: lowerAccess.includes('no code') ? 'no-code' : lowerAccess.includes('code') ? 'code-needed' : lowerAccess.includes('customer') ? 'customer-only' : lowerAccess.includes('paid') ? 'paid' : lowerAccess.includes('public') ? 'public' : 'unknown',
-      openNow: true,
       type: String(formData.get('type') || 'Other'),
+      access: access || 'Access unknown',
+      accessMode: String(formData.get('accessMode') || 'unknown'),
       facilities,
-      photoCount: 0,
-      vibeTags: facilities.slice(0, 3),
-      crowdLevel: 'New listing · needs more check-ins',
-      criteria: {
-        cleanliness: 4.0,
-        queueFactor: 4.0,
-        paperQuality: 4.0,
-        lockConfidence: 4.0,
-        vibe: 4.0,
-        essentials: 4.0,
-        soundSafety: 4.0
-      }
+      city: String(formData.get('city') || '').trim(),
+      lat: state.userLocation?.lat ?? null,
+      lng: state.userLocation?.lng ?? null,
+      vibeTags: facilities.slice(0, 3)
     };
-    if (!custom.tags.length) custom.tags = ['New throne', 'Needs ratings'];
 
-    let created = custom;
-    if (API?.isConfigured?.()) {
-      if (!state.authUser) {
-        toast('Sign in required', 'Supabase bathroom submissions need an account.');
-        setState({ modal: 'auth' });
-        return;
-      }
-      try {
-        created = await API.addBathroom(custom, state.authUser.id);
-        state = { ...state, syncMessage: 'Bathroom submitted to Supabase moderation.' };
-      } catch (error) {
-        toast('Supabase save failed', error.message);
-        return;
-      }
+    try {
+      const created = await API.addBathroom(input, state.authUser.id);
+      await updateBadgeUnlocks({ bathroomAdded: true });
+      state = {
+        ...state,
+        selectedBathroomId: created.id,
+        modal: null,
+        activeTab: 'map',
+        syncMessage: 'Bathroom submitted to Supabase moderation.'
+      };
+      render();
+      toast('Bathroom added', 'Saved to Supabase as pending.');
+      await syncSupabase({ silent: true });
+    } catch (error) {
+      toast('Supabase save failed', error.message);
     }
-
-    state = {
-      ...state,
-      customBathrooms: API?.isConfigured?.() ? state.customBathrooms : [...state.customBathrooms, created],
-      remoteBathrooms: API?.isConfigured?.() ? [created, ...(state.remoteBathrooms || [])] : state.remoteBathrooms,
-      unlockedBadges: [...new Set([...(state.unlockedBadges || []), 'hidden-gem-hunter'])],
-      selectedBathroomId: created.id,
-      modal: null,
-      activeTab: 'map'
-    };
-    persist();
-    render();
-    toast('Bathroom added', API?.isConfigured?.() ? 'Saved to Supabase as pending. Hidden Gem Hunter progress started.' : 'Hidden Gem Hunter progress started.');
   }
 
-  function updateBadges(checkins) {
-    const unlocked = new Set(state.unlockedBadges);
-    const unique = new Set(checkins.map((c) => c.bathroomId));
-    if (checkins.length >= 1) unlocked.add('emergency-landing');
-    if (state.customBathrooms.length >= 1) unlocked.add('hidden-gem-hunter');
-    if (unique.size >= 5) unlocked.add('pub-crawl-plumber');
-    if (unique.size >= 10) unlocked.add('golden-flush');
-    if (checkins.some((c) => c.bathroomId === 'fox-barrel')) unlocked.add('porcelain-royalty');
-    return [...unlocked];
+  async function updateBadgeUnlocks(extra = {}) {
+    if (!state.authUser || !state.badges.length) return;
+    try {
+      const latestCheckins = await API.listMyCheckins(state.authUser.id);
+      const unique = new Set(latestCheckins.map((item) => item.bathroomId));
+      const toUnlock = [];
+      if (latestCheckins.length >= 1) toUnlock.push('emergency-landing');
+      if (unique.size >= 5) toUnlock.push('pub-crawl-plumber');
+      if (unique.size >= 10) toUnlock.push('golden-flush');
+      if (extra.bathroomAdded) toUnlock.push('hidden-gem-hunter');
+      await Promise.all(toUnlock.map((badgeId) => API.unlockBadge(state.authUser.id, badgeId).catch(() => null)));
+    } catch {
+      // Badge unlocks are non-critical; check-in/add should not fail because of badge rules.
+    }
+  }
+
+  async function loadReviews(bathroomId) {
+    if (!bathroomId || state.reviewsByBathroom[bathroomId]) return;
+    try {
+      const reviews = await API.listReviews(bathroomId);
+      state = {
+        ...state,
+        reviewsByBathroom: {
+          ...state.reviewsByBathroom,
+          [bathroomId]: reviews
+        }
+      };
+      render();
+    } catch (error) {
+      state = {
+        ...state,
+        reviewsByBathroom: {
+          ...state.reviewsByBathroom,
+          [bathroomId]: []
+        }
+      };
+      render();
+    }
   }
 
   function toast(title, subtitle) {
@@ -1288,5 +1446,5 @@
   }
 
   render();
-  initSupabase();
+  initApp();
 })();

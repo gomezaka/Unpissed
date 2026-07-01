@@ -1,54 +1,39 @@
-# Unpissed API contract draft
+# API contract v0.5
 
-The static prototype runs without a backend. These endpoints are scaffolds for the first Netlify/Supabase connection.
+Unpissed v0.5 talks directly to Supabase from the frontend using the Supabase anon key and Row Level Security.
 
-## `GET /.netlify/functions/bathrooms`
-Returns nearby bathrooms with rating summary, facilities, access mode and photo metadata.
+There are no custom Netlify API endpoints for core app data in this version.
 
-Future query params:
-- `lat`
-- `lng`
-- `radius_meters`
-- `min_rating`
-- `access_mode`
-- `open_now`
-- `facility`
+## Frontend reads
 
-## `POST /.netlify/functions/bathrooms`
-Creates a new bathroom suggestion.
+- `bathroom_cards` view
+- `badges`
+- `user_badges`
+- `checkins`
+- `ratings`
+- `feed_events`
+- `photos`
 
-Required fields:
-- `name`
-- `type`
-- `access_note`
-- `lat`
-- `lng`
+## Frontend writes
 
-## `POST /.netlify/functions/checkins`
-Creates a check-in and rating.
+Authenticated users can:
 
-Required fields:
-- `bathroomId`
-- `anonymous`
-- `criteria`
-- `comment`
-- `photoId` optional
+- insert `bathrooms`
+- insert `checkins`
+- insert `ratings`
+- insert `photos`
+- insert `feed_events`
+- insert `user_badges`
+- insert `reports`
 
-## `POST /.netlify/functions/r2-upload-url`
-Creates a short-lived upload permission for Cloudflare R2.
+## Security model
 
-Future checks:
-- user is authenticated
-- file type is image/jpeg, image/png or image/webp
-- file size is within limit
-- bathroom/check-in exists
+- Public data is protected by Supabase RLS policies.
+- The frontend only uses the anon/publishable key.
+- Never expose the Supabase `service_role` key in this app.
 
-## `POST /.netlify/functions/moderate-image`
-Creates or updates image moderation state.
+## Remaining serverless endpoint
 
-Rules:
-- no people
-- no nudity
-- no explicit bathroom content
-- no children
-- useful location/vibe context only
+`/.netlify/functions/health`
+
+Used only for deployment health checks.

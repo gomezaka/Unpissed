@@ -1,27 +1,11 @@
-# Cloudflare R2 image plan
+# Cloudflare R2
 
-Use Cloudflare R2 for original uploaded images. Store only metadata in Supabase.
+Cloudflare R2 is not wired into v0.5.
 
-Recommended object keys:
+The current production path is:
 
 ```text
-bathrooms/{bathroomId}/photos/{photoId}.jpg
-checkins/{checkinId}/photos/{photoId}.jpg
-users/{userId}/avatars/{avatarId}.jpg
+Supabase Storage bucket: bathroom-photos
 ```
 
-Recommended upload flow:
-
-1. User selects image in app.
-2. App compresses/resizes locally.
-3. App calls Netlify Function `r2-upload-url`.
-4. Function validates auth, file type and target bathroom/check-in.
-5. Function returns a temporary upload URL or upload token.
-6. Browser uploads directly to R2.
-7. App stores metadata in Supabase `photos` table.
-8. Photo starts with `moderation_status = pending`.
-9. Approved photos appear in bathroom gallery/feed.
-
-Photo rule shown in UI:
-
-> Show the vibe, not the victims. No people, no nudity, no disasters.
+R2 can be added later if image traffic or transformation costs make it useful. For now, keeping images in Supabase Storage makes the app simpler and avoids an extra upload/signing flow.
