@@ -17,7 +17,11 @@ window.UNPISSED_DATA = {
       tags: ['Public-ish', 'No code', 'Great lighting'],
       status: 'TRENDING',
       access: 'Public-ish · No code · Great lighting',
+      accessMode: 'no-code',
+      openNow: true,
       type: 'Bar',
+      facilities: ['Gender-neutral', 'Mirror', 'Hooks', 'Soap', 'Good lighting'],
+      photoCount: 3,
       criteria: {
         cleanliness: 4.7,
         queueFactor: 4.2,
@@ -39,7 +43,11 @@ window.UNPISSED_DATA = {
       tags: ['Code needed', 'Mirror wall', 'Fast queue'],
       status: 'OPEN',
       access: 'Code needed · Mirror wall · Fast queue',
+      accessMode: 'code-needed',
+      openNow: true,
       type: 'Restaurant',
+      facilities: ['Mirror', 'Dryer', 'Soap'],
+      photoCount: 2,
       criteria: {
         cleanliness: 4.1,
         queueFactor: 4.4,
@@ -61,7 +69,11 @@ window.UNPISSED_DATA = {
       tags: ['Public', 'Loud music', 'Risky paper'],
       status: 'BUSY',
       access: 'Public · Loud music · Risky paper',
+      accessMode: 'public',
+      openNow: true,
       type: 'Venue',
+      facilities: ['Public access', 'Dryer', 'Loud enough'],
+      photoCount: 1,
       criteria: {
         cleanliness: 3.5,
         queueFactor: 3.2,
@@ -70,6 +82,58 @@ window.UNPISSED_DATA = {
         vibe: 4.3,
         essentials: 3.4,
         soundSafety: 4.8
+      }
+    },
+    {
+      id: 'civic-square',
+      name: 'Civic Square Restroom',
+      rating: 4.5,
+      distanceMinutes: 4,
+      distanceMiles: 0.2,
+      x: 41,
+      y: 67,
+      tags: ['Public', 'Accessible', 'Closes late'],
+      status: 'OPEN',
+      access: 'Public · Accessible · Closes late',
+      accessMode: 'public',
+      openNow: true,
+      type: 'Public',
+      facilities: ['Accessible', 'Changing table', 'Soap', 'Public access'],
+      photoCount: 4,
+      criteria: {
+        cleanliness: 4.5,
+        queueFactor: 4.0,
+        paperQuality: 4.2,
+        lockConfidence: 4.6,
+        vibe: 4.1,
+        essentials: 4.8,
+        soundSafety: 4.0
+      }
+    },
+    {
+      id: 'velvet-basement',
+      name: 'Velvet Basement',
+      rating: 3.9,
+      distanceMinutes: 9,
+      distanceMiles: 0.6,
+      x: 18,
+      y: 74,
+      tags: ['Customer-only', 'Dark vibe', 'No queue'],
+      status: 'OPEN',
+      access: 'Customer-only · Dark vibe · No queue',
+      accessMode: 'customer-only',
+      openNow: true,
+      type: 'Club',
+      facilities: ['Mirror', 'Hooks', 'Loud enough'],
+      photoCount: 2,
+      criteria: {
+        cleanliness: 3.7,
+        queueFactor: 4.8,
+        paperQuality: 3.3,
+        lockConfidence: 3.8,
+        vibe: 4.9,
+        essentials: 3.4,
+        soundSafety: 4.7
       }
     }
   ],
@@ -107,6 +171,13 @@ window.UNPISSED_DATA = {
       title: 'Hidden Gem Hunter',
       subtitle: 'You found the throne before it was famous.',
       description: 'Be the first to add a bathroom that later becomes highly rated.',
+      unlocked: false
+    },
+    {
+      id: 'night-watch',
+      title: 'Night Watch',
+      subtitle: 'Rated after midnight. Brave work.',
+      description: 'Check in between midnight and 04:00.',
       unlocked: false
     }
   ],

@@ -1,11 +1,11 @@
 {
   "name": "unpissed-app",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Static mobile-first PWA prototype for Unpissed.",
   "scripts": {
     "dev": "npx serve .",
-    "check": "node --check js/app.js && node --check js/data.js"
+    "check": "node --check js/app.js && node --check js/data.js && node --check netlify/functions/health.js && node --check netlify/functions/r2-upload-url.js"
   },
   "keywords": ["pwa", "netlify", "bathroom", "check-in"],
   "license": "UNLICENSED"

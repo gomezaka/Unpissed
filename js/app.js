@@ -1,6 +1,6 @@
 (() => {
   const DATA = window.UNPISSED_DATA;
-  const STORAGE_KEY = 'unpissed-demo-state-v1';
+  const STORAGE_KEY = 'unpissed-demo-state-v2';
 
   const defaultState = {
     activeTab: 'map',
@@ -10,7 +10,13 @@
     checkinBathroomId: 'fox-barrel',
     checkins: [],
     customBathrooms: [],
-    unlockedBadges: ['emergency-landing']
+    unlockedBadges: ['emergency-landing'],
+    filters: {
+      topRated: false,
+      noCode: false,
+      openNow: false,
+      accessible: false
+    }
   };
 
   let state = loadState();
@@ -40,8 +46,25 @@
     return [...DATA.bathrooms, ...state.customBathrooms];
   }
 
+  function filteredBathrooms() {
+    return bathrooms().filter((bathroom) => {
+      const filters = state.filters || {};
+      if (filters.topRated && Number(bathroom.rating) < 4.5) return false;
+      if (filters.noCode && bathroom.accessMode !== 'no-code' && !String(bathroom.access || '').toLowerCase().includes('no code')) return false;
+      if (filters.openNow && bathroom.openNow === false) return false;
+      if (filters.accessible && !(bathroom.facilities || []).some((item) => item.toLowerCase().includes('accessible'))) return false;
+      return true;
+    });
+  }
+
   function selectedBathroom() {
-    return bathrooms().find((b) => b.id === state.selectedBathroomId) || bathrooms()[0];
+    const all = bathrooms();
+    const visible = filteredBathrooms();
+    return all.find((b) => b.id === state.selectedBathroomId) || visible[0] || all[0];
+  }
+
+  function photoEntriesForBathroom(bathroomId) {
+    return state.checkins.filter((checkin) => checkin.bathroomId === bathroomId && checkin.photoName).slice(-3).reverse();
   }
 
   function icon(name) {
@@ -59,6 +82,8 @@
       close: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>',
       star: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2Z"></path></svg>',
       route: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 19a3 3 0 1 1 0-6c3 0 5 3 8 3a4 4 0 0 0 0-8"></path><circle cx="18" cy="5" r="2"></circle><circle cx="6" cy="19" r="2"></circle></svg>',
+      camera: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 4.5 16 7h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h3l1.5-2.5h5Z"></path><circle cx="12" cy="13" r="3"></circle></svg>',
+      filter: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"></path></svg>',
       lock: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>'
     };
     return icons[name] || '';
@@ -152,9 +177,10 @@
         <span class="emergency-arrow">${icon('chevron')}</span>
       </button>
 
+      ${renderFilterBar()}
       <div class="section-row">
         <h2 class="section-title">Bathroom hotspots nearby</h2>
-        <span class="section-meta">0.4 mi radius</span>
+        <span class="section-meta">${filteredBathrooms().length} visible · 0.6 mi radius</span>
       </div>
       ${renderMap()}
       ${renderBathroomCard(bathroom)}
@@ -168,8 +194,28 @@
     `;
   }
 
+
+  function renderFilterBar() {
+    const filters = state.filters || {};
+    const items = [
+      ['topRated', '4.5+'],
+      ['noCode', 'No code'],
+      ['openNow', 'Open now'],
+      ['accessible', 'Accessible']
+    ];
+    return `
+      <div class="filter-bar" aria-label="Bathroom filters">
+        <span class="filter-label">${icon('filter')} Filters</span>
+        ${items.map(([key, label]) => `
+          <button class="filter-chip ${filters[key] ? 'is-active' : ''}" data-action="toggle-filter" data-filter-key="${key}">${label}</button>
+        `).join('')}
+      </div>
+    `;
+  }
+
   function renderMap() {
-    const pins = bathrooms().map((bathroom) => `
+    const visibleBathrooms = filteredBathrooms();
+    const pins = visibleBathrooms.map((bathroom) => `
       <button
         class="map-pin ${bathroom.id === state.selectedBathroomId ? 'is-active' : ''}"
         style="left:${bathroom.x}%; top:${bathroom.y}%;"
@@ -177,6 +223,7 @@
         aria-label="Select ${escapeHtml(bathroom.name)}"
       ><span class="star">★</span>${rounded(bathroom.rating)}</button>
     `).join('');
+    const emptyState = visibleBathrooms.length ? '' : '<div class="map-empty">No matches. Lower your standards, temporarily.</div>';
 
     return `
       <div class="map-card" role="img" aria-label="Stylized map with nearby bathroom ratings">
@@ -184,6 +231,7 @@
         <span class="road"></span><span class="road"></span><span class="road"></span><span class="road"></span><span class="road"></span>
         <span class="you-dot" aria-label="You are here"></span>
         ${pins}
+        ${emptyState}
         <button class="add-throne" data-action="open-add-bathroom"><span>+</span> Add this throne to the map</button>
         <button class="recenter" data-action="recenter" aria-label="Recenter map">${icon('locate')}</button>
       </div>
@@ -215,6 +263,7 @@
             <span class="trending-pill">${escapeHtml(bathroom.status || 'OPEN')}</span>
           </div>
           <div class="chip-row">${bathroom.tags.map((tag) => `<span class="pill">${escapeHtml(tag)}</span>`).join('')}</div>
+          ${renderPhotoStrip(bathroom)}
           <div class="breakdown">
             <div class="card-kicker">Rate the relief</div>
             ${criteriaRows}
@@ -226,6 +275,26 @@
           <button class="secondary-button" data-action="open-details" data-bathroom-id="${bathroom.id}">Details</button>
         </div>
       </article>
+    `;
+  }
+
+
+  function renderPhotoStrip(bathroom) {
+    const uploaded = photoEntriesForBathroom(bathroom.id);
+    const placeholders = Math.max(0, Math.min(3, Number(bathroom.photoCount || 0)) - uploaded.length);
+    const uploadedCards = uploaded.map((entry) => `
+      <div class="photo-tile photo-tile--uploaded" title="${escapeHtml(entry.photoName)}">
+        ${icon('camera')}
+        <span>${escapeHtml(entry.photoName)}</span>
+      </div>
+    `).join('');
+    const placeholderCards = Array.from({ length: placeholders }, (_, index) => `
+      <div class="photo-tile"><span>Bathroom photo ${index + 1}</span></div>
+    `).join('');
+    return `
+      <div class="photo-strip" aria-label="Bathroom photos">
+        ${uploadedCards}${placeholderCards || '<div class="photo-tile"><span>No photos yet</span></div>'}
+      </div>
     `;
   }
 
@@ -264,7 +333,7 @@
       id: `checkin-${index}`,
       initials: state.anonymous ? '??' : DATA.user.initials,
       avatar: 'gold',
-      text: `<b>${state.anonymous ? 'Someone discreet' : DATA.user.name}</b> checked in at <b>${escapeHtml(checkin.bathroomName)}</b>`,
+      text: `<b>${state.anonymous ? 'Someone discreet' : DATA.user.name}</b> checked in at <b>${escapeHtml(checkin.bathroomName)}</b>${checkin.photoName ? ' · added a photo' : ''}`,
       time: 'now'
     }));
     const feed = [...personalEvents, ...DATA.feed];
@@ -334,8 +403,31 @@
           <p>${escapeHtml(DATA.user.city)} · Anonymous mode ${state.anonymous ? 'on' : 'off'} · Best nearby: ${escapeHtml(best.name)}</p>
         </article>
         <div style="height:12px"></div>
+        ${renderCheckinHistory()}
+        <div style="height:12px"></div>
         <button class="secondary-button full-width" data-action="reset-demo">Reset demo data</button>
       </section>
+    `;
+  }
+
+
+  function renderCheckinHistory() {
+    const items = state.checkins.slice().reverse().slice(0, 5);
+    if (!items.length) {
+      return `<article class="simple-card"><h3>Recent check-ins</h3><p>No check-ins yet. Your porcelain legacy starts here.</p></article>`;
+    }
+    return `
+      <article class="simple-card">
+        <h3>Recent check-ins</h3>
+        <div class="history-list">
+          ${items.map((item) => `
+            <div class="history-row">
+              <span>${escapeHtml(item.bathroomName)}</span>
+              <b>${rounded(item.rating)} ★</b>
+            </div>
+          `).join('')}
+        </div>
+      </article>
     `;
   }
 
@@ -427,6 +519,11 @@
         </article>
         ${criteriaRows}
         <div class="form-field">
+          <label for="checkin-photo">Optional photo</label>
+          <input id="checkin-photo" name="photo" type="file" accept="image/*" />
+          <small>Demo stores only the filename. Netlify + Cloudflare upload is scaffolded for later.</small>
+        </div>
+        <div class="form-field">
           <label for="checkin-comment">Comment</label>
           <textarea id="checkin-comment" name="comment" maxlength="160" placeholder="No soap. No hope."></textarea>
         </div>
@@ -454,7 +551,13 @@
         <h3>${escapeHtml(bathroom.name)}</h3>
         <p><span class="gold-text">${rounded(bathroom.rating)} ★</span> · ${bathroom.distanceMinutes} min walk · ${escapeHtml(bathroom.type)}</p>
         <p style="margin-top:8px">${escapeHtml(bathroom.access)}</p>
+        <div class="chip-row chip-row--compact">${(bathroom.facilities || []).map((item) => `<span class="pill">${escapeHtml(item)}</span>`).join('')}</div>
       </article>
+      <div style="height:14px"></div>
+      <div class="simple-card">
+        <div class="card-kicker">Photos</div>
+        ${renderPhotoStrip(bathroom)}
+      </div>
       <div style="height:14px"></div>
       <div class="simple-card">
         <div class="card-kicker">Full breakdown</div>
@@ -487,6 +590,10 @@
         <div class="form-field">
           <label for="bathroom-access">Access note</label>
           <input id="bathroom-access" name="access" maxlength="80" placeholder="No code · Great lighting · Public-ish" />
+        </div>
+        <div class="form-field">
+          <label for="bathroom-facilities">Facilities</label>
+          <input id="bathroom-facilities" name="facilities" maxlength="120" placeholder="Accessible, soap, hooks, changing table" />
         </div>
         <button class="primary-button full-width" type="submit">Add this throne</button>
       </form>
@@ -580,6 +687,13 @@
         persist();
         element.setAttribute('aria-pressed', String(state.anonymous));
         break;
+      case 'toggle-filter': {
+        const key = element.dataset.filterKey;
+        const nextFilters = { ...(state.filters || {}) };
+        nextFilters[key] = !nextFilters[key];
+        setState({ filters: nextFilters });
+        break;
+      }
       case 'route-to':
         toast('Emergency route ready', 'Follow the blue line. Dignity may be restored.');
         setState({ modal: null, selectedBathroomId: element.dataset.bathroomId || state.selectedBathroomId });
@@ -608,6 +722,7 @@
       criteria[key] = Number(formData.get(key));
     });
     const rating = overallFromCriteria(criteria);
+    const photo = form.querySelector('input[name="photo"]')?.files?.[0];
     const checkin = {
       id: `checkin-${Date.now()}`,
       bathroomId: bathroom.id,
@@ -615,6 +730,7 @@
       criteria,
       rating,
       comment: String(formData.get('comment') || '').trim(),
+      photoName: photo ? photo.name : '',
       anonymous: state.anonymous,
       createdAt: new Date().toISOString()
     };
@@ -640,6 +756,8 @@
     if (!name) return;
     const access = String(formData.get('access') || 'Access unknown').trim();
     const id = `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}-${Date.now().toString(36)}`;
+    const facilities = String(formData.get('facilities') || '').split(',').map((item) => item.trim()).filter(Boolean);
+    const lowerAccess = access.toLowerCase();
     const custom = {
       id,
       name,
@@ -651,7 +769,11 @@
       tags: access.split('·').map((tag) => tag.trim()).filter(Boolean).slice(0, 3),
       status: 'NEW',
       access,
+      accessMode: lowerAccess.includes('no code') ? 'no-code' : lowerAccess.includes('code') ? 'code-needed' : lowerAccess.includes('customer') ? 'customer-only' : 'unknown',
+      openNow: true,
       type: String(formData.get('type') || 'Other'),
+      facilities,
+      photoCount: 0,
       criteria: {
         cleanliness: 4.0,
         queueFactor: 4.0,

@@ -13,3 +13,6 @@
   for = "/sw.js"
   [headers.values]
     Cache-Control = "no-cache"
+
+[functions]
+  directory = "netlify/functions"
