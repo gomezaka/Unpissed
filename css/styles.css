@@ -1649,7 +1649,18 @@ textarea:focus-visible {
   }
 }
 
-/* v0.4 Supabase readiness */
+/* Profile status */
+.profile-status-stack {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.profile-status-stack .backend-strip,
+.profile-status-stack .location-strip {
+  margin: 0;
+}
+
 .backend-strip {
   display: flex;
   align-items: center;

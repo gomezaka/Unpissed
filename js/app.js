@@ -232,7 +232,6 @@
       <section class="screen">
         <div class="scroll-area">
           ${renderHeader()}
-          ${renderBackendStrip()}
           ${renderRouteBanner()}
           ${renderActiveTab()}
         </div>
@@ -329,7 +328,6 @@
 
       ${renderSearchBar()}
       ${renderFilterBar()}
-      ${renderLocationStrip()}
       <div class="section-row">
         <h2 class="section-title">Bathroom hotspots nearby</h2>
         <span class="section-meta">${filteredBathrooms().length} visible</span>
@@ -645,6 +643,10 @@
       <section class="content-page">
         <h2 class="page-title">Profile</h2>
         <p class="page-subtitle">Your bathroom history. Probably don't frame it.</p>
+        <div class="profile-status-stack">
+          ${renderBackendStrip()}
+          ${renderLocationStrip()}
+        </div>
         <div class="stats-grid">
           <div class="stat-card"><b>${state.checkins.length}</b><span>Check-ins</span></div>
           <div class="stat-card"><b>${uniqueCount}</b><span>Unique thrones</span></div>

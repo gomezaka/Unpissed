@@ -1,4 +1,4 @@
-const CACHE_NAME = 'unpissed-v0.6.1.1.0';
+const CACHE_NAME = 'unpissed-v0.6.1.2.0';
 const ASSETS = [
   './',
   './index.html',
@@ -13,7 +13,11 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)));
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) =>
+      cache.addAll(ASSETS.map((asset) => new Request(asset, { cache: 'reload' })))
+    )
+  );
   self.skipWaiting();
 });
 
@@ -28,10 +32,22 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  const requestUrl = new URL(event.request.url);
+  const isAppAsset = requestUrl.origin === self.location.origin;
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).catch(() => caches.match('./index.html'));
+    caches.open(CACHE_NAME).then(async (cache) => {
+      if (isAppAsset) {
+        try {
+          const fresh = await fetch(event.request);
+          cache.put(event.request, fresh.clone());
+          return fresh;
+        } catch {
+          const cached = await caches.match(event.request);
+          return cached || caches.match('./index.html');
+        }
+      }
+      const cached = await caches.match(event.request);
+      return cached || fetch(event.request);
     })
   );
 });
