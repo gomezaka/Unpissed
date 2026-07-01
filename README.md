@@ -1,28 +1,38 @@
-# Unpissed v0.2
+# Unpissed v0.3
 
 Static mobile-first PWA prototype for **Unpissed**.
 
-The app is built from the provided mobile design direction and is ready to run locally or deploy on Netlify as a static site.
+The app is still frontend-only, but v0.3 is closer to a real MVP structure: it has better discovery, better check-in context, privacy-aware social UI and clearer backend scaffolding for Netlify + Supabase + Cloudflare R2.
 
 ## What is included
 
 - Mobile-first dark nightlife UI
 - Interactive bathroom map with selectable pins
 - Emergency Mode modal
+- Active emergency-route banner
+- Bathroom search by name, vibe, access, type or facilities
 - Bathroom filters: 4.5+, no code, open now, accessible
+- Horizontal nearby bathroom rail
 - Bathroom profile card with rating breakdown
+- Live-ish crowd pulse and vibe tags
 - Photo placeholders and optional demo photo filename on check-in
+- Photo-safety copy: no people, no nudity, no chaos
 - Check-in and rating flow
-- Badge page
-- Social feed
-- Profile/stats page with recent check-ins
+- Recent reviews in bathroom details
+- Access intelligence in bathroom details
+- Privacy issue report placeholder
+- Badge page with progress bars
+- Social feed with friend radar and privacy copy
+- Profile/stats page with city bathroom scene card
 - Add bathroom modal with facilities field
 - LocalStorage demo persistence
 - PWA manifest and service worker
 - Netlify config
 - Netlify Functions scaffold
 - Supabase SQL schema draft
+- Supabase seed draft
 - Cloudflare R2 upload placeholder function
+- API contract and R2 planning docs
 
 ## What is not included yet
 
@@ -31,7 +41,7 @@ The app is built from the provided mobile design direction and is ready to run l
 - Real geolocation/map provider
 - Real Cloudflare R2/Images upload
 - Real friend/follow system
-- Image moderation
+- Real moderation queue
 
 ## Local testing
 
@@ -74,13 +84,19 @@ The included `netlify.toml` sets the publish directory and functions directory.
 
 ### Supabase
 
-A first database draft is included here:
+Database draft:
 
 ```text
 supabase/schema.sql
 ```
 
-It includes tables for:
+Seed draft:
+
+```text
+supabase/seed.sql
+```
+
+Included core tables:
 
 - profiles
 - bathrooms
@@ -90,16 +106,28 @@ It includes tables for:
 - badges
 - user_badges
 - follows
+- feed_events
+- reports
+
+### Netlify Functions
+
+Scaffolded functions:
+
+```text
+netlify/functions/health.js
+netlify/functions/bathrooms.js
+netlify/functions/checkins.js
+netlify/functions/r2-upload-url.js
+netlify/functions/moderate-image.js
+```
 
 ### Cloudflare R2
 
-A placeholder function is included here:
+Planning doc:
 
 ```text
-netlify/functions/r2-upload-url.js
+docs/CLOUDFLARE_R2.md
 ```
-
-It does not generate real signed URLs yet. It defines the intended API shape and required environment variables.
 
 Required future environment variables:
 
@@ -112,4 +140,10 @@ CLOUDFLARE_R2_SECRET_ACCESS_KEY
 
 ## Suggested next development step
 
-Next version should connect the app to Supabase Auth and replace localStorage demo check-ins with real database writes.
+Next version should add the first real backend adapter:
+
+1. Supabase project setup
+2. Auth screen or anonymous demo login
+3. Real bathroom reads from Supabase
+4. Real check-in writes to Supabase
+5. Keep localStorage as fallback/demo mode

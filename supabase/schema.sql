@@ -142,3 +142,34 @@ create policy "users can add own photos" on public.photos for insert with check 
 create policy "user badges readable" on public.user_badges for select using (true);
 create policy "follows readable" on public.follows for select using (true);
 create policy "users can manage own follows" on public.follows for all using (auth.uid() = follower_id) with check (auth.uid() = follower_id);
+
+-- v0.3 additions: feed, reviews, reports and privacy-safe social layer.
+create table if not exists public.feed_events (
+  id uuid primary key default gen_random_uuid(),
+  actor_id uuid references public.profiles(id) on delete set null,
+  event_type text not null check (event_type in ('checkin','badge','bathroom_added','trending','review')),
+  bathroom_id uuid references public.bathrooms(id) on delete cascade,
+  checkin_id uuid references public.checkins(id) on delete cascade,
+  badge_id text references public.badges(id) on delete set null,
+  visibility text not null default 'friends_delayed' check (visibility in ('private','friends_delayed','friends','public')),
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.reports (
+  id uuid primary key default gen_random_uuid(),
+  reporter_id uuid references public.profiles(id) on delete set null,
+  bathroom_id uuid references public.bathrooms(id) on delete cascade,
+  photo_id uuid references public.photos(id) on delete cascade,
+  reason text not null,
+  status text not null default 'open' check (status in ('open','reviewing','resolved','dismissed')),
+  created_at timestamptz not null default now()
+);
+
+alter table public.feed_events enable row level security;
+alter table public.reports enable row level security;
+
+create policy "feed events readable by app" on public.feed_events for select using (visibility in ('friends_delayed','friends','public'));
+create policy "users can create feed events" on public.feed_events for insert with check (auth.uid() = actor_id);
+
+create policy "users can create reports" on public.reports for insert with check (auth.uid() = reporter_id);

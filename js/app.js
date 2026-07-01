@@ -1,6 +1,6 @@
 (() => {
   const DATA = window.UNPISSED_DATA;
-  const STORAGE_KEY = 'unpissed-demo-state-v2';
+  const STORAGE_KEY = 'unpissed-demo-state-v3';
 
   const defaultState = {
     activeTab: 'map',
@@ -8,6 +8,8 @@
     modal: null,
     anonymous: true,
     checkinBathroomId: 'fox-barrel',
+    searchQuery: '',
+    routeBathroomId: null,
     checkins: [],
     customBathrooms: [],
     unlockedBadges: ['emergency-landing'],
@@ -49,6 +51,18 @@
   function filteredBathrooms() {
     return bathrooms().filter((bathroom) => {
       const filters = state.filters || {};
+      const query = String(state.searchQuery || '').trim().toLowerCase();
+      if (query) {
+        const haystack = [
+          bathroom.name,
+          bathroom.type,
+          bathroom.access,
+          ...(bathroom.tags || []),
+          ...(bathroom.facilities || []),
+          ...(bathroom.vibeTags || [])
+        ].join(' ').toLowerCase();
+        if (!haystack.includes(query)) return false;
+      }
       if (filters.topRated && Number(bathroom.rating) < 4.5) return false;
       if (filters.noCode && bathroom.accessMode !== 'no-code' && !String(bathroom.access || '').toLowerCase().includes('no code')) return false;
       if (filters.openNow && bathroom.openNow === false) return false;
@@ -115,6 +129,7 @@
         ${renderStatusBar()}
         <div class="scroll-area">
           ${renderHeader()}
+          ${renderRouteBanner()}
           ${renderActiveTab()}
         </div>
         ${renderBottomNav()}
@@ -177,13 +192,16 @@
         <span class="emergency-arrow">${icon('chevron')}</span>
       </button>
 
+      ${renderSearchBar()}
       ${renderFilterBar()}
       <div class="section-row">
         <h2 class="section-title">Bathroom hotspots nearby</h2>
         <span class="section-meta">${filteredBathrooms().length} visible · 0.6 mi radius</span>
       </div>
       ${renderMap()}
+      ${renderNearbyList()}
       ${renderBathroomCard(bathroom)}
+      ${renderTrustCard()}
 
       <div class="section-row">
         <h2 class="section-title">Tonight around you</h2>
@@ -194,6 +212,59 @@
     `;
   }
 
+
+
+  function renderRouteBanner() {
+    if (!state.routeBathroomId) return '';
+    const bathroom = bathrooms().find((item) => item.id === state.routeBathroomId);
+    if (!bathroom) return '';
+    return `
+      <button class="route-banner" data-action="open-details" data-bathroom-id="${bathroom.id}">
+        <span>${icon('route')}</span>
+        <div><b>Emergency route active</b><small>${escapeHtml(bathroom.name)} · ${bathroom.distanceMinutes} min walk</small></div>
+        <em>Open</em>
+      </button>
+    `;
+  }
+
+  function renderSearchBar() {
+    return `
+      <form class="search-card" data-form="bathroom-search">
+        <label class="sr-only" for="bathroom-search">Search bathrooms</label>
+        <input id="bathroom-search" name="query" value="${escapeHtml(state.searchQuery || '')}" placeholder="Search by vibe, access or place" autocomplete="off" />
+        ${state.searchQuery ? '<button class="search-clear" type="button" data-action="clear-search">Clear</button>' : ''}
+        <button class="search-submit" type="submit">Search</button>
+      </form>
+    `;
+  }
+
+  function renderNearbyList() {
+    const visible = filteredBathrooms().slice().sort((a, b) => a.distanceMinutes - b.distanceMinutes);
+    if (!visible.length) return '';
+    return `
+      <div class="nearby-rail" aria-label="Nearby bathrooms">
+        ${visible.map((bathroom) => `
+          <button class="nearby-pill ${bathroom.id === selectedBathroom().id ? 'is-active' : ''}" data-select-bathroom="${bathroom.id}">
+            <b>${escapeHtml(bathroom.name)}</b>
+            <span>${rounded(bathroom.rating)} ★ · ${bathroom.distanceMinutes} min</span>
+          </button>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function renderTrustCard() {
+    return `
+      <article class="trust-card">
+        <div>
+          <p class="card-kicker">Photo rules</p>
+          <h3>Show the vibe, not the victims.</h3>
+          <p>No people, no nudity, no disasters. Useful photos only.</p>
+        </div>
+        <button class="secondary-button" data-action="open-add-bathroom">Add throne</button>
+      </article>
+    `;
+  }
 
   function renderFilterBar() {
     const filters = state.filters || {};
@@ -263,6 +334,7 @@
             <span class="trending-pill">${escapeHtml(bathroom.status || 'OPEN')}</span>
           </div>
           <div class="chip-row">${bathroom.tags.map((tag) => `<span class="pill">${escapeHtml(tag)}</span>`).join('')}</div>
+          ${renderCrowdPulse(bathroom)}
           ${renderPhotoStrip(bathroom)}
           <div class="breakdown">
             <div class="card-kicker">Rate the relief</div>
@@ -278,6 +350,17 @@
     `;
   }
 
+
+
+  function renderCrowdPulse(bathroom) {
+    const tags = (bathroom.vibeTags || []).slice(0, 3).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('');
+    return `
+      <div class="crowd-pulse">
+        <div><b>Live-ish pulse</b><span>${escapeHtml(bathroom.crowdLevel || 'Crowd level unknown')}</span></div>
+        <div class="vibe-tags">${tags}</div>
+      </div>
+    `;
+  }
 
   function renderPhotoStrip(bathroom) {
     const uploaded = photoEntriesForBathroom(bathroom.id);
@@ -341,8 +424,29 @@
       <section class="content-page">
         <h2 class="page-title">Feed</h2>
         <p class="page-subtitle">Friend activity, trending thrones and questionable little victories.</p>
+        ${renderFriendRadar()}
         ${renderActivityCard(feed)}
       </section>
+    `;
+  }
+
+
+  function renderFriendRadar() {
+    return `
+      <article class="simple-card friend-radar">
+        <div class="card-kicker">Friend radar</div>
+        <p class="privacy-note">Privacy-friendly by default: delayed activity, no exact real-time bathroom location.</p>
+        <div class="friend-list">
+          ${DATA.friendRadar.map((friend) => `
+            <div class="friend-row">
+              <span class="mini-avatar teal">${escapeHtml(friend.initials)}</span>
+              <div><b>${escapeHtml(friend.name)}</b><small>${escapeHtml(friend.status)} · ${escapeHtml(friend.distance)}</small></div>
+              <em>${escapeHtml(friend.privacy)}</em>
+            </div>
+          `).join('')}
+        </div>
+      </article>
+      <div style="height:12px"></div>
     `;
   }
 
@@ -369,19 +473,40 @@
         <h2 class="page-title">Badges</h2>
         <p class="page-subtitle">Collect proof of your most unnecessary achievements.</p>
         <div class="badge-grid">
-          ${badges.map((badge) => `
+          ${badges.map((badge) => {
+            const progress = badgeProgress(badge.id);
+            return `
             <article class="badge-list-item ${badge.unlocked ? '' : 'is-locked'}">
               <div class="badge-list-icon">${badge.unlocked ? icon('pulse') : icon('lock')}</div>
               <div class="badge-list-copy">
                 <h3>${escapeHtml(badge.title)} ${badge.unlocked ? '<span class="gold-text">✓</span>' : '<span class="faint-text">Locked</span>'}</h3>
                 <p>${escapeHtml(badge.subtitle)}</p>
                 <p class="faint-text">${escapeHtml(badge.description)}</p>
+                <div class="badge-progress"><span style="width:${progress.percent}%"></span></div>
+                <small>${escapeHtml(progress.label)}</small>
               </div>
-            </article>
-          `).join('')}
+            </article>`;
+          }).join('')}
         </div>
       </section>
     `;
+  }
+
+
+  function badgeProgress(badgeId) {
+    const checkins = state.checkins || [];
+    const unique = new Set(checkins.map((item) => item.bathroomId));
+    const sameNight = checkins.length;
+    const rules = {
+      'emergency-landing': [checkins.length >= 1 ? 1 : 0, 1, 'Complete one emergency-style check-in'],
+      'golden-flush': [unique.size, 10, `${unique.size}/10 unique bathrooms`],
+      'pub-crawl-plumber': [sameNight, 5, `${Math.min(sameNight, 5)}/5 check-ins in demo night`],
+      'porcelain-royalty': [checkins.some((item) => item.bathroomId === 'fox-barrel') ? 1 : 0, 1, 'Visit the city favorite'],
+      'hidden-gem-hunter': [state.customBathrooms.length, 1, `${Math.min(state.customBathrooms.length, 1)}/1 bathroom added`],
+      'night-watch': [0, 1, 'Check in after midnight']
+    };
+    const [value, target, label] = rules[badgeId] || [0, 1, 'Hidden rule'];
+    return { percent: Math.max(0, Math.min(100, (value / target) * 100)), label };
   }
 
   function renderProfilePage() {
@@ -401,6 +526,11 @@
         <article class="simple-card">
           <h3>${escapeHtml(DATA.user.name)}</h3>
           <p>${escapeHtml(DATA.user.city)} · Anonymous mode ${state.anonymous ? 'on' : 'off'} · Best nearby: ${escapeHtml(best.name)}</p>
+        </article>
+        <div style="height:12px"></div>
+        <article class="simple-card city-card">
+          <h3>${escapeHtml(DATA.cityStats.city)} bathroom scene</h3>
+          <p>${DATA.cityStats.bathrooms} mapped thrones · Trending: ${escapeHtml(DATA.cityStats.trending)} · Busiest: ${escapeHtml(DATA.cityStats.busiest)}</p>
         </article>
         <div style="height:12px"></div>
         ${renderCheckinHistory()}
@@ -498,6 +628,15 @@
     return renderModalShell('Emergency Mode', 'Closest survivable thrones. No judgment.', body);
   }
 
+
+  function quickVerdict(bathroom) {
+    const rating = Number(bathroom.rating || 0);
+    if (rating >= 4.7) return 'Top-tier relief. Proceed with confidence.';
+    if (rating >= 4.2) return 'Solid choice. Dignity likely preserved.';
+    if (rating >= 3.6) return 'Acceptable backup. Keep expectations medium.';
+    return 'Emergency only. Lower standards before entering.';
+  }
+
   function renderCheckinModal() {
     const bathroom = bathrooms().find((b) => b.id === state.checkinBathroomId) || selectedBathroom();
     const criteriaRows = Object.entries(DATA.criteriaLabels).map(([key, label]) => {
@@ -516,12 +655,13 @@
         <article class="simple-card">
           <h3>${escapeHtml(bathroom.name)}</h3>
           <p>${escapeHtml(bathroom.access)} · ${bathroom.distanceMinutes} min walk</p>
+          <div class="quick-verdict">${quickVerdict(bathroom)}</div>
         </article>
         ${criteriaRows}
         <div class="form-field">
           <label for="checkin-photo">Optional photo</label>
           <input id="checkin-photo" name="photo" type="file" accept="image/*" />
-          <small>Demo stores only the filename. Netlify + Cloudflare upload is scaffolded for later.</small>
+          <small>Demo stores only the filename. Real upload will use Netlify Function → Cloudflare R2. No people, no nudity, no chaos.</small>
         </div>
         <div class="form-field">
           <label for="checkin-comment">Comment</label>
@@ -564,9 +704,46 @@
         ${allCriteria}
       </div>
       <div style="height:14px"></div>
+      ${renderReviewList(bathroom.id)}
+      <div style="height:14px"></div>
+      <article class="simple-card"><h3>Access intelligence</h3><p>${escapeHtml(bathroom.crowdLevel || 'Unknown crowd level')} · ${escapeHtml((bathroom.vibeTags || []).join(' · ') || 'No vibe tags yet')}</p></article>
+      <div style="height:14px"></div>
+      <button class="secondary-button full-width" data-action="report-privacy">Report privacy issue</button>
+      <div style="height:10px"></div>
       <button class="primary-button full-width" data-action="open-checkin" data-bathroom-id="${bathroom.id}">Check in on the throne</button>
     `;
     return renderModalShell('Bathroom details', 'Useful facts before a questionable decision.', body);
+  }
+
+
+  function renderReviewList(bathroomId) {
+    const personal = state.checkins
+      .filter((checkin) => checkin.bathroomId === bathroomId && checkin.comment)
+      .slice(-3)
+      .reverse()
+      .map((checkin) => ({
+        id: checkin.id,
+        author: checkin.anonymous ? 'Anonymous relief agent' : DATA.user.name,
+        rating: checkin.rating,
+        text: checkin.comment,
+        time: 'now'
+      }));
+    const seeded = (DATA.reviews || []).filter((review) => review.bathroomId === bathroomId);
+    const reviews = [...personal, ...seeded].slice(0, 4);
+    if (!reviews.length) return '<article class="simple-card"><h3>Reviews</h3><p>No reviews yet. Be the brave one.</p></article>';
+    return `
+      <article class="simple-card">
+        <h3>Recent reviews</h3>
+        <div class="review-list">
+          ${reviews.map((review) => `
+            <div class="review-row">
+              <div><b>${escapeHtml(review.author)}</b><small>${escapeHtml(review.text)}</small></div>
+              <span>${rounded(review.rating)} ★</span>
+            </div>
+          `).join('')}
+        </div>
+      </article>
+    `;
   }
 
   function renderAddBathroomModal() {
@@ -653,6 +830,11 @@
       });
     });
 
+    const searchForm = document.querySelector('[data-form="bathroom-search"]');
+    if (searchForm) {
+      searchForm.addEventListener('submit', handleSearchSubmit);
+    }
+
     const checkinForm = document.querySelector('[data-form="checkin"]');
     if (checkinForm) {
       checkinForm.addEventListener('submit', handleCheckinSubmit);
@@ -687,6 +869,12 @@
         persist();
         element.setAttribute('aria-pressed', String(state.anonymous));
         break;
+      case 'clear-search':
+        setState({ searchQuery: '' });
+        break;
+      case 'report-privacy':
+        toast('Report noted', 'In production this will create a moderation ticket.');
+        break;
       case 'toggle-filter': {
         const key = element.dataset.filterKey;
         const nextFilters = { ...(state.filters || {}) };
@@ -696,7 +884,7 @@
       }
       case 'route-to':
         toast('Emergency route ready', 'Follow the blue line. Dignity may be restored.');
-        setState({ modal: null, selectedBathroomId: element.dataset.bathroomId || state.selectedBathroomId });
+        setState({ modal: null, selectedBathroomId: element.dataset.bathroomId || state.selectedBathroomId, routeBathroomId: element.dataset.bathroomId || state.selectedBathroomId });
         break;
       case 'recenter':
         toast('Map recentered', 'You are still here. Stay strong.');
@@ -710,6 +898,18 @@
       default:
         break;
     }
+  }
+
+
+  function handleSearchSubmit(event) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const query = String(formData.get('query') || '').trim();
+    const nextVisible = bathrooms().filter((bathroom) => {
+      const haystack = [bathroom.name, bathroom.type, bathroom.access, ...(bathroom.tags || []), ...(bathroom.facilities || []), ...(bathroom.vibeTags || [])].join(' ').toLowerCase();
+      return !query || haystack.includes(query.toLowerCase());
+    });
+    setState({ searchQuery: query, selectedBathroomId: nextVisible[0]?.id || state.selectedBathroomId });
   }
 
   function handleCheckinSubmit(event) {
@@ -774,6 +974,8 @@
       type: String(formData.get('type') || 'Other'),
       facilities,
       photoCount: 0,
+      vibeTags: facilities.slice(0, 3),
+      crowdLevel: 'New listing · needs more check-ins',
       criteria: {
         cleanliness: 4.0,
         queueFactor: 4.0,
@@ -788,6 +990,7 @@
     state = {
       ...state,
       customBathrooms: [...state.customBathrooms, custom],
+      unlockedBadges: [...new Set([...(state.unlockedBadges || []), 'hidden-gem-hunter'])],
       selectedBathroomId: custom.id,
       modal: null,
       activeTab: 'map'
@@ -801,7 +1004,7 @@
     const unlocked = new Set(state.unlockedBadges);
     const unique = new Set(checkins.map((c) => c.bathroomId));
     if (checkins.length >= 1) unlocked.add('emergency-landing');
-    if (unique.size >= 3) unlocked.add('hidden-gem-hunter');
+    if (state.customBathrooms.length >= 1) unlocked.add('hidden-gem-hunter');
     if (unique.size >= 5) unlocked.add('pub-crawl-plumber');
     if (unique.size >= 10) unlocked.add('golden-flush');
     if (checkins.some((c) => c.bathroomId === 'fox-barrel')) unlocked.add('porcelain-royalty');

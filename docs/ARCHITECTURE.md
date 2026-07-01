@@ -1,29 +1,70 @@
 # Unpissed architecture draft
 
-## Current v0.2
+## Current v0.3 state
 
-The app is still a static mobile-first PWA. It uses `localStorage` for demo state.
-
-## Intended stack
+The app is still static and runs fully in the browser.
 
 ```text
-GitHub -> Netlify -> Static PWA
-Netlify Functions -> secure server-side helpers
-Supabase -> auth + Postgres + RLS
-Cloudflare R2 / Images -> bathroom photos
+index.html
+  css/styles.css
+  js/data.js
+  js/app.js
+  localStorage demo state
 ```
 
-## Why this split
+No backend credentials are required yet.
 
-- GitHub stores source code, not user content.
-- Netlify hosts the app and small API helpers.
-- Supabase stores users, bathrooms, ratings, check-ins, follows and badges.
-- Cloudflare stores and serves user photos.
+## Target architecture
 
-## Next backend task
+```text
+GitHub
+  -> Netlify deploy
+      -> Static PWA frontend
+      -> Netlify Functions
+          -> Supabase Auth/Postgres
+          -> Cloudflare R2 upload permissions
 
-1. Create Supabase project.
-2. Run `supabase/schema.sql`.
-3. Add Supabase URL and anon key to environment/config.
-4. Replace `js/data.js` + `localStorage` with Supabase queries.
-5. Implement `netlify/functions/r2-upload-url.js` with real signed R2 uploads.
+Cloudflare R2
+  -> Original uploaded bathroom/check-in photos
+
+Supabase
+  -> profiles
+  -> bathrooms
+  -> checkins
+  -> ratings
+  -> photos metadata
+  -> badges
+  -> feed_events
+  -> reports
+```
+
+## Privacy defaults
+
+Unpissed should not show exact real-time bathroom activity by default.
+
+Recommended defaults:
+
+- anonymous check-in enabled
+- feed activity delayed
+- exact bathroom location hidden from friends in real time
+- photo moderation required before public display
+- privacy report button on every bathroom/photo context
+
+## Image policy
+
+Photo upload rule:
+
+> Show the vibe, not the victims. No people, no nudity, no disasters.
+
+Store the original file in Cloudflare R2 and metadata in Supabase `photos`.
+
+## Next backend step
+
+Create a small data adapter that can switch between:
+
+```text
+demoLocalStorageAdapter
+supabaseAdapter
+```
+
+That lets the prototype remain useful while Supabase is introduced screen by screen.

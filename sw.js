@@ -1,4 +1,4 @@
-const CACHE_NAME = 'unpissed-v0.2.0';
+const CACHE_NAME = 'unpissed-v0.3.0';
 const ASSETS = [
   './',
   './index.html',

@@ -22,6 +22,8 @@ window.UNPISSED_DATA = {
       type: 'Bar',
       facilities: ['Gender-neutral', 'Mirror', 'Hooks', 'Soap', 'Good lighting'],
       photoCount: 3,
+      vibeTags: ['Selfie light', 'Dry floor', 'Calm lock energy'],
+      crowdLevel: 'Low queue · 2 stalls available',
       criteria: {
         cleanliness: 4.7,
         queueFactor: 4.2,
@@ -48,6 +50,8 @@ window.UNPISSED_DATA = {
       type: 'Restaurant',
       facilities: ['Mirror', 'Dryer', 'Soap'],
       photoCount: 2,
+      vibeTags: ['Neon mirror', 'Receipt code', 'Quick stop'],
+      crowdLevel: 'Moderate queue · code needed',
       criteria: {
         cleanliness: 4.1,
         queueFactor: 4.4,
@@ -74,6 +78,8 @@ window.UNPISSED_DATA = {
       type: 'Venue',
       facilities: ['Public access', 'Dryer', 'Loud enough'],
       photoCount: 1,
+      vibeTags: ['Loud cover', 'Arcade chaos', 'Backup plan'],
+      crowdLevel: 'Busy · expect a wait',
       criteria: {
         cleanliness: 3.5,
         queueFactor: 3.2,
@@ -100,6 +106,8 @@ window.UNPISSED_DATA = {
       type: 'Public',
       facilities: ['Accessible', 'Changing table', 'Soap', 'Public access'],
       photoCount: 4,
+      vibeTags: ['Accessible', 'Clean public option', 'Late close'],
+      crowdLevel: 'Steady · usually fine',
       criteria: {
         cleanliness: 4.5,
         queueFactor: 4.0,
@@ -126,6 +134,8 @@ window.UNPISSED_DATA = {
       type: 'Club',
       facilities: ['Mirror', 'Hooks', 'Loud enough'],
       photoCount: 2,
+      vibeTags: ['Dark vibe', 'No queue', 'Club basement'],
+      crowdLevel: 'No queue · bring confidence',
       criteria: {
         cleanliness: 3.7,
         queueFactor: 4.8,
@@ -205,6 +215,53 @@ window.UNPISSED_DATA = {
       time: 'now'
     }
   ],
+
+  reviews: [
+    {
+      id: 'review-1',
+      bathroomId: 'fox-barrel',
+      author: 'Mia',
+      rating: 4.9,
+      text: 'Elite mirror. Zero code. Suspiciously good paper.',
+      time: '8m'
+    },
+    {
+      id: 'review-2',
+      bathroomId: 'fox-barrel',
+      author: 'Alex',
+      rating: 4.7,
+      text: 'Lighting said main character. Queue said side quest.',
+      time: '22m'
+    },
+    {
+      id: 'review-3',
+      bathroomId: 'neon-noodle',
+      author: 'Sam',
+      rating: 4.2,
+      text: 'Code on receipt. Worth the noodles, honestly.',
+      time: '31m'
+    },
+    {
+      id: 'review-4',
+      bathroomId: 'civic-square',
+      author: 'Taylor',
+      rating: 4.5,
+      text: 'Public bathroom that did not ruin my faith in society.',
+      time: '1h'
+    }
+  ],
+  friendRadar: [
+    { id: 'friend-1', name: 'Mia', initials: 'MB', status: 'near a 4.8 ★ throne', distance: '0.2 mi', privacy: 'delayed' },
+    { id: 'friend-2', name: 'Alex', initials: 'AK', status: 'rated downtown', distance: '0.4 mi', privacy: 'hidden now' },
+    { id: 'friend-3', name: 'Sam', initials: 'SN', status: 'unlocked Emergency Landing', distance: '0.6 mi', privacy: 'public' }
+  ],
+  cityStats: {
+    city: 'Downtown',
+    bathrooms: 42,
+    trending: 'The Fox & Barrel',
+    highestRated: 'The Fox & Barrel',
+    busiest: 'Metro Arcade Hall'
+  },
   criteriaLabels: {
     cleanliness: 'Cleanliness',
     queueFactor: 'Queue Factor',
