@@ -1648,3 +1648,68 @@ textarea:focus-visible {
     grid-template-columns: 1fr;
   }
 }
+
+/* v0.4 Supabase readiness */
+.backend-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(28, 34, 49, 0.82);
+}
+
+.backend-strip b,
+.backend-strip span {
+  display: block;
+}
+
+.backend-strip b {
+  font-size: 13px;
+}
+
+.backend-strip span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.25;
+}
+
+.backend-strip--live {
+  border-color: rgba(85, 214, 164, 0.42);
+  background: linear-gradient(135deg, rgba(85, 214, 164, 0.12), rgba(28, 34, 49, 0.92));
+}
+
+.backend-strip--ready {
+  border-color: rgba(106, 162, 255, 0.42);
+  background: linear-gradient(135deg, rgba(78, 125, 255, 0.14), rgba(28, 34, 49, 0.92));
+}
+
+.backend-strip--demo {
+  border-color: rgba(244, 200, 97, 0.36);
+}
+
+.backend-strip__button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  border-radius: 12px;
+  padding: 0 12px;
+  background: var(--surface-soft);
+  color: var(--text);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.two-button-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.avatar {
+  color: var(--text);
+}

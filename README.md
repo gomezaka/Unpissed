@@ -1,47 +1,53 @@
-# Unpissed v0.3
+# Unpissed v0.4
 
-Static mobile-first PWA prototype for **Unpissed**.
+Static mobile-first PWA prototype for **Unpissed** with optional Supabase backend.
 
-The app is still frontend-only, but v0.3 is closer to a real MVP structure: it has better discovery, better check-in context, privacy-aware social UI and clearer backend scaffolding for Netlify + Supabase + Cloudflare R2.
+The app still works as a local demo, but v0.4 is the first version that can connect to a real Supabase project for Auth, database and image storage.
 
-## What is included
+## Included
 
 - Mobile-first dark nightlife UI
 - Interactive bathroom map with selectable pins
-- Emergency Mode modal
-- Active emergency-route banner
-- Bathroom search by name, vibe, access, type or facilities
-- Bathroom filters: 4.5+, no code, open now, accessible
-- Horizontal nearby bathroom rail
-- Bathroom profile card with rating breakdown
-- Live-ish crowd pulse and vibe tags
-- Photo placeholders and optional demo photo filename on check-in
-- Photo-safety copy: no people, no nudity, no chaos
+- Emergency Mode
+- Search and filters
+- Bathroom profile cards
 - Check-in and rating flow
-- Recent reviews in bathroom details
-- Access intelligence in bathroom details
-- Privacy issue report placeholder
-- Badge page with progress bars
-- Social feed with friend radar and privacy copy
-- Profile/stats page with city bathroom scene card
-- Add bathroom modal with facilities field
-- LocalStorage demo persistence
+- Optional check-in photo field
+- Badges and badge progress
+- Feed and friend radar preview
+- Profile/stat page
+- Add bathroom flow
+- LocalStorage demo fallback
+- Supabase client adapter
+- Supabase Auth modal
+- Supabase database read/write support
+- Supabase Storage upload support
+- Supabase SQL schema and seed files
 - PWA manifest and service worker
 - Netlify config
-- Netlify Functions scaffold
-- Supabase SQL schema draft
-- Supabase seed draft
-- Cloudflare R2 upload placeholder function
-- API contract and R2 planning docs
 
-## What is not included yet
+## New in v0.4
 
-- Real Supabase connection
-- Real authentication
+- `js/config.js` runtime config
+- `js/supabase-api.js` backend adapter
+- Login/signup modal
+- Supabase status strip: demo / ready / live / error
+- Bathroom reads from Supabase when configured
+- Check-ins and ratings can be written to Supabase
+- Bathroom submissions can be written to Supabase
+- Photo upload path moved from Cloudflare R2 placeholder to Supabase Storage for the first MVP
+- `supabase/schema.sql` updated with RLS, auth profile trigger and storage policies
+- `supabase/seed.sql` now includes demo bathroom rows
+- `docs/SUPABASE_SETUP.md`
+
+## Still not included
+
 - Real geolocation/map provider
-- Real Cloudflare R2/Images upload
-- Real friend/follow system
-- Real moderation queue
+- Production moderation dashboard
+- Server-side badge engine
+- Full friends/follows UI
+- Real realtime feed
+- Cloudflare image optimization/CDN layer
 
 ## Local testing
 
@@ -70,6 +76,25 @@ npm run dev
 npm run check
 ```
 
+## Supabase setup
+
+See:
+
+```text
+docs/SUPABASE_SETUP.md
+```
+
+Quick version:
+
+1. Create a Supabase project.
+2. Run `supabase/schema.sql` in SQL Editor.
+3. Run `supabase/seed.sql` in SQL Editor.
+4. Edit `js/config.js`.
+5. Set `ENABLE_SUPABASE: true`.
+6. Paste Supabase Project URL and anon public key.
+7. Start the app locally.
+8. Create a test user from the app.
+
 ## Netlify deployment
 
 1. Create a GitHub repository.
@@ -80,70 +105,12 @@ npm run check
 
 The included `netlify.toml` sets the publish directory and functions directory.
 
-## Backend preparation
+## Recommended next step
 
-### Supabase
+v0.5 should focus on making Supabase the primary source of truth:
 
-Database draft:
-
-```text
-supabase/schema.sql
-```
-
-Seed draft:
-
-```text
-supabase/seed.sql
-```
-
-Included core tables:
-
-- profiles
-- bathrooms
-- checkins
-- ratings
-- photos
-- badges
-- user_badges
-- follows
-- feed_events
-- reports
-
-### Netlify Functions
-
-Scaffolded functions:
-
-```text
-netlify/functions/health.js
-netlify/functions/bathrooms.js
-netlify/functions/checkins.js
-netlify/functions/r2-upload-url.js
-netlify/functions/moderate-image.js
-```
-
-### Cloudflare R2
-
-Planning doc:
-
-```text
-docs/CLOUDFLARE_R2.md
-```
-
-Required future environment variables:
-
-```text
-CLOUDFLARE_ACCOUNT_ID
-CLOUDFLARE_R2_BUCKET
-CLOUDFLARE_R2_ACCESS_KEY_ID
-CLOUDFLARE_R2_SECRET_ACCESS_KEY
-```
-
-## Suggested next development step
-
-Next version should add the first real backend adapter:
-
-1. Supabase project setup
-2. Auth screen or anonymous demo login
-3. Real bathroom reads from Supabase
-4. Real check-in writes to Supabase
-5. Keep localStorage as fallback/demo mode
+- remote check-in history
+- remote profile stats
+- remote feed events
+- actual bathroom detail reviews from database
+- server-side badge unlocks

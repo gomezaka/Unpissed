@@ -1,6 +1,7 @@
 (() => {
   const DATA = window.UNPISSED_DATA;
-  const STORAGE_KEY = 'unpissed-demo-state-v3';
+  const API = window.UnpissedSupabase;
+  const STORAGE_KEY = 'unpissed-demo-state-v4';
 
   const defaultState = {
     activeTab: 'map',
@@ -10,6 +11,11 @@
     checkinBathroomId: 'fox-barrel',
     searchQuery: '',
     routeBathroomId: null,
+    authUser: null,
+    authProfile: null,
+    remoteBathrooms: [],
+    backendStatus: API?.isConfigured?.() ? 'configured' : 'demo',
+    syncMessage: API?.isConfigured?.() ? 'Supabase configured. Sign in to write data.' : 'Demo mode. Add Supabase keys in js/config.js.',
     checkins: [],
     customBathrooms: [],
     unlockedBadges: ['emergency-landing'],
@@ -34,7 +40,7 @@
   }
 
   function persist() {
-    const { modal, activeTab, selectedBathroomId, ...stored } = state;
+    const { modal, activeTab, selectedBathroomId, authUser, authProfile, remoteBathrooms, backendStatus, syncMessage, ...stored } = state;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
   }
 
@@ -45,7 +51,9 @@
   }
 
   function bathrooms() {
-    return [...DATA.bathrooms, ...state.customBathrooms];
+    const remote = Array.isArray(state.remoteBathrooms) ? state.remoteBathrooms : [];
+    const base = remote.length ? remote : DATA.bathrooms;
+    return [...base, ...state.customBathrooms];
   }
 
   function filteredBathrooms() {
@@ -129,6 +137,7 @@
         ${renderStatusBar()}
         <div class="scroll-area">
           ${renderHeader()}
+          ${renderBackendStrip()}
           ${renderRouteBanner()}
           ${renderActiveTab()}
         </div>
@@ -152,7 +161,17 @@
     `;
   }
 
+  function initialsFromName(name = '') {
+    const parts = String(name || DATA.user.name).trim().split(/\s+/).filter(Boolean);
+    return parts.slice(0, 2).map((part) => part[0]).join('').toUpperCase() || DATA.user.initials;
+  }
+
+  function currentDisplayName() {
+    return state.authProfile?.display_name || state.authUser?.email?.split('@')[0] || DATA.user.name;
+  }
+
   function renderHeader() {
+    const initials = state.authUser ? initialsFromName(currentDisplayName()) : DATA.user.initials;
     return `
       <header class="header">
         <div>
@@ -164,9 +183,29 @@
             ${icon('bell')}
             <span class="notification-dot" aria-hidden="true"></span>
           </button>
-          <div class="avatar" aria-label="Profile avatar">${DATA.user.initials}</div>
+          <button class="avatar" data-action="open-auth" aria-label="Account">${escapeHtml(initials)}</button>
         </div>
       </header>
+    `;
+  }
+
+
+
+  function renderBackendStrip() {
+    const configured = Boolean(API?.isConfigured?.());
+    const signedIn = Boolean(state.authUser);
+    const label = configured ? (signedIn ? 'Supabase live' : 'Supabase ready') : 'Demo mode';
+    const tone = configured ? (signedIn ? 'live' : 'ready') : 'demo';
+    return `
+      <section class="backend-strip backend-strip--${tone}">
+        <div>
+          <b>${escapeHtml(label)}</b>
+          <span>${escapeHtml(state.syncMessage || '')}</span>
+        </div>
+        <button class="backend-strip__button" data-action="${configured ? (signedIn ? 'sync-supabase' : 'open-auth') : 'open-backend-help'}">
+          ${configured ? (signedIn ? 'Sync' : 'Sign in') : 'Setup'}
+        </button>
+      </section>
     `;
   }
 
@@ -524,8 +563,10 @@
           <div class="stat-card"><b>${rounded(best.rating)}</b><span>Best nearby</span></div>
         </div>
         <article class="simple-card">
-          <h3>${escapeHtml(DATA.user.name)}</h3>
-          <p>${escapeHtml(DATA.user.city)} · Anonymous mode ${state.anonymous ? 'on' : 'off'} · Best nearby: ${escapeHtml(best.name)}</p>
+          <h3>${escapeHtml(currentDisplayName())}</h3>
+          <p>${state.authUser ? 'Signed in with Supabase' : 'Demo user'} · Anonymous mode ${state.anonymous ? 'on' : 'off'} · Best nearby: ${escapeHtml(best.name)}</p>
+          <div style="height:12px"></div>
+          <button class="secondary-button full-width" data-action="open-auth">${state.authUser ? 'Account settings' : 'Sign in / connect Supabase'}</button>
         </article>
         <div style="height:12px"></div>
         <article class="simple-card city-card">
@@ -591,6 +632,7 @@
     if (state.modal === 'details') return renderDetailsModal();
     if (state.modal === 'addBathroom') return renderAddBathroomModal();
     if (state.modal === 'notifications') return renderNotificationsModal();
+    if (state.modal === 'auth') return renderAuthModal();
     return '';
   }
 
@@ -661,7 +703,7 @@
         <div class="form-field">
           <label for="checkin-photo">Optional photo</label>
           <input id="checkin-photo" name="photo" type="file" accept="image/*" />
-          <small>Demo stores only the filename. Real upload will use Netlify Function → Cloudflare R2. No people, no nudity, no chaos.</small>
+          <small>Demo stores only the filename. With Supabase enabled, photos upload to Supabase Storage. No people, no nudity, no chaos.</small>
         </div>
         <div class="form-field">
           <label for="checkin-comment">Comment</label>
@@ -778,6 +820,58 @@
     return renderModalShell('Add this throne', 'Show the vibe, not the victims. No people, no chaos.', body);
   }
 
+
+  function renderAuthModal() {
+    if (!API?.isConfigured?.()) {
+      const body = `
+        <article class="simple-card">
+          <h3>Supabase is not enabled yet</h3>
+          <p>Edit <b>js/config.js</b>, set <b>ENABLE_SUPABASE: true</b>, and paste your Supabase URL and anon key.</p>
+          <div style="height:12px"></div>
+          <p class="faint-text">Until then, Unpissed keeps running in demo/localStorage mode.</p>
+        </article>
+      `;
+      return renderModalShell('Backend setup', 'Demo mode is still active.', body);
+    }
+
+    if (state.authUser) {
+      const body = `
+        <article class="simple-card">
+          <h3>${escapeHtml(currentDisplayName())}</h3>
+          <p>${escapeHtml(state.authUser.email || 'Signed in user')} · connected to Supabase</p>
+        </article>
+        <div style="height:12px"></div>
+        <button class="primary-button full-width" data-action="sync-supabase">Sync bathrooms</button>
+        <div style="height:10px"></div>
+        <button class="secondary-button full-width" data-action="sign-out">Sign out</button>
+      `;
+      return renderModalShell('Account', 'Supabase session is active.', body);
+    }
+
+    const body = `
+      <form class="form-grid" data-form="auth">
+        <div class="form-field">
+          <label for="auth-display-name">Display name</label>
+          <input id="auth-display-name" name="displayName" maxlength="40" placeholder="Jordan" />
+          <small>Only needed when creating a new account.</small>
+        </div>
+        <div class="form-field">
+          <label for="auth-email">Email</label>
+          <input id="auth-email" name="email" type="email" required autocomplete="email" placeholder="you@example.com" />
+        </div>
+        <div class="form-field">
+          <label for="auth-password">Password</label>
+          <input id="auth-password" name="password" type="password" required minlength="6" autocomplete="current-password" placeholder="Minimum 6 characters" />
+        </div>
+        <div class="two-button-row">
+          <button class="secondary-button full-width" type="submit" name="mode" value="signup">Create account</button>
+          <button class="primary-button full-width" type="submit" name="mode" value="signin">Sign in</button>
+        </div>
+      </form>
+    `;
+    return renderModalShell('Sign in', 'Connect your porcelain legacy to Supabase.', body);
+  }
+
   function renderNotificationsModal() {
     const body = `
       <div class="list-stack">
@@ -844,6 +938,11 @@
     if (addBathroomForm) {
       addBathroomForm.addEventListener('submit', handleAddBathroomSubmit);
     }
+
+    const authForm = document.querySelector('[data-form="auth"]');
+    if (authForm) {
+      authForm.addEventListener('submit', handleAuthSubmit);
+    }
   }
 
   function handleAction(action, element, event) {
@@ -864,6 +963,16 @@
       case 'open-notifications':
         setState({ modal: 'notifications' });
         break;
+      case 'open-auth':
+      case 'open-backend-help':
+        setState({ modal: 'auth' });
+        break;
+      case 'sync-supabase':
+        syncSupabase();
+        break;
+      case 'sign-out':
+        signOut();
+        break;
       case 'toggle-anonymous':
         state.anonymous = !state.anonymous;
         persist();
@@ -873,7 +982,7 @@
         setState({ searchQuery: '' });
         break;
       case 'report-privacy':
-        toast('Report noted', 'In production this will create a moderation ticket.');
+        reportPrivacyIssue();
         break;
       case 'toggle-filter': {
         const key = element.dataset.filterKey;
@@ -901,6 +1010,124 @@
   }
 
 
+
+  async function initSupabase() {
+    if (!API?.isConfigured?.()) {
+      setState({ backendStatus: 'demo', syncMessage: 'Demo mode. Add Supabase keys in js/config.js.' });
+      return;
+    }
+    try {
+      const { user } = await API.getSession();
+      let profile = null;
+      if (user) profile = await API.ensureProfile(user);
+      state = {
+        ...state,
+        authUser: user,
+        authProfile: profile,
+        backendStatus: user ? 'live' : 'configured',
+        syncMessage: user ? 'Signed in. Loading bathrooms from Supabase.' : 'Supabase configured. Sign in to write data.'
+      };
+      render();
+      await syncSupabase({ silent: true });
+    } catch (error) {
+      setState({ backendStatus: 'error', syncMessage: `Supabase error: ${error.message}` });
+    }
+  }
+
+  async function syncSupabase(options = {}) {
+    if (!API?.isConfigured?.()) {
+      setState({ modal: 'auth' });
+      return;
+    }
+    try {
+      const remoteBathrooms = await API.listBathrooms();
+      state = {
+        ...state,
+        remoteBathrooms,
+        backendStatus: state.authUser ? 'live' : 'configured',
+        syncMessage: remoteBathrooms.length ? `${remoteBathrooms.length} bathrooms loaded from Supabase.` : 'Supabase connected. No bathrooms yet; using demo data until rows exist.',
+        modal: options.keepModal ? state.modal : state.modal
+      };
+      persist();
+      render();
+      if (!options.silent) toast('Supabase synced', state.syncMessage);
+    } catch (error) {
+      state = { ...state, backendStatus: 'error', syncMessage: `Sync failed: ${error.message}` };
+      render();
+      toast('Sync failed', error.message);
+    }
+  }
+
+  async function signOut() {
+    try {
+      await API?.signOut?.();
+      state = {
+        ...state,
+        authUser: null,
+        authProfile: null,
+        backendStatus: API?.isConfigured?.() ? 'configured' : 'demo',
+        syncMessage: API?.isConfigured?.() ? 'Signed out. Demo reads still work.' : 'Demo mode.',
+        modal: null
+      };
+      render();
+      toast('Signed out', 'Back to discreet demo mode.');
+    } catch (error) {
+      toast('Sign out failed', error.message);
+    }
+  }
+
+  async function reportPrivacyIssue() {
+    const bathroom = selectedBathroom();
+    if (API?.isConfigured?.() && state.authUser) {
+      try {
+        await API.reportPrivacyIssue({ bathroomId: bathroom.id, reason: 'privacy_issue' }, state.authUser.id);
+        toast('Report saved', 'Moderation ticket created in Supabase.');
+        return;
+      } catch (error) {
+        toast('Report failed', error.message);
+        return;
+      }
+    }
+    toast('Report noted', 'Demo mode only. Sign in to save reports to Supabase.');
+  }
+
+  async function handleAuthSubmit(event) {
+    event.preventDefault();
+    if (!API?.isConfigured?.()) {
+      setState({ modal: 'auth' });
+      return;
+    }
+    const submitter = event.submitter;
+    const mode = submitter?.value || 'signin';
+    const formData = new FormData(event.currentTarget);
+    const email = String(formData.get('email') || '').trim();
+    const password = String(formData.get('password') || '');
+    const displayName = String(formData.get('displayName') || '').trim();
+    if (!email || !password) return;
+
+    try {
+      const result = mode === 'signup'
+        ? await API.signUp(email, password, displayName)
+        : await API.signIn(email, password);
+      const currentSession = await API.getSession();
+      const user = currentSession.user || result.session?.user || (mode === 'signin' ? result.user : null);
+      const profile = user ? await API.ensureProfile(user, displayName) : null;
+      state = {
+        ...state,
+        authUser: user,
+        authProfile: profile,
+        modal: null,
+        backendStatus: 'live',
+        syncMessage: user ? 'Signed in. Supabase writes are active.' : 'Check your email to confirm the account, then sign in.'
+      };
+      render();
+      toast(user ? 'Signed in' : 'Check your email', state.syncMessage);
+      await syncSupabase({ silent: true });
+    } catch (error) {
+      toast(mode === 'signup' ? 'Sign up failed' : 'Sign in failed', error.message);
+    }
+  }
+
   function handleSearchSubmit(event) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
@@ -912,7 +1139,7 @@
     setState({ searchQuery: query, selectedBathroomId: nextVisible[0]?.id || state.selectedBathroomId });
   }
 
-  function handleCheckinSubmit(event) {
+  async function handleCheckinSubmit(event) {
     event.preventDefault();
     const form = event.currentTarget;
     const bathroom = bathrooms().find((b) => b.id === state.checkinBathroomId) || selectedBathroom();
@@ -935,6 +1162,21 @@
       createdAt: new Date().toISOString()
     };
 
+    if (API?.isConfigured?.()) {
+      if (!state.authUser) {
+        toast('Sign in required', 'Supabase check-ins need an account.');
+        setState({ modal: 'auth' });
+        return;
+      }
+      try {
+        await API.createCheckin({ ...checkin, photo }, state.authUser.id);
+        state = { ...state, syncMessage: 'Check-in saved to Supabase.' };
+      } catch (error) {
+        toast('Supabase save failed', error.message);
+        return;
+      }
+    }
+
     const nextCheckins = [...state.checkins, checkin];
     const nextBadges = updateBadges(nextCheckins);
     state = {
@@ -946,10 +1188,11 @@
     };
     persist();
     render();
-    toast('Check-in saved', 'Badge progress updated. Your family does not need to know.');
+    toast('Check-in saved', API?.isConfigured?.() ? 'Saved to Supabase and local badge progress.' : 'Badge progress updated. Your family does not need to know.');
+    if (API?.isConfigured?.()) syncSupabase({ silent: true });
   }
 
-  function handleAddBathroomSubmit(event) {
+  async function handleAddBathroomSubmit(event) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     const name = String(formData.get('name') || '').trim();
@@ -969,7 +1212,7 @@
       tags: access.split('·').map((tag) => tag.trim()).filter(Boolean).slice(0, 3),
       status: 'NEW',
       access,
-      accessMode: lowerAccess.includes('no code') ? 'no-code' : lowerAccess.includes('code') ? 'code-needed' : lowerAccess.includes('customer') ? 'customer-only' : 'unknown',
+      accessMode: lowerAccess.includes('no code') ? 'no-code' : lowerAccess.includes('code') ? 'code-needed' : lowerAccess.includes('customer') ? 'customer-only' : lowerAccess.includes('paid') ? 'paid' : lowerAccess.includes('public') ? 'public' : 'unknown',
       openNow: true,
       type: String(formData.get('type') || 'Other'),
       facilities,
@@ -987,17 +1230,35 @@
       }
     };
     if (!custom.tags.length) custom.tags = ['New throne', 'Needs ratings'];
+
+    let created = custom;
+    if (API?.isConfigured?.()) {
+      if (!state.authUser) {
+        toast('Sign in required', 'Supabase bathroom submissions need an account.');
+        setState({ modal: 'auth' });
+        return;
+      }
+      try {
+        created = await API.addBathroom(custom, state.authUser.id);
+        state = { ...state, syncMessage: 'Bathroom submitted to Supabase moderation.' };
+      } catch (error) {
+        toast('Supabase save failed', error.message);
+        return;
+      }
+    }
+
     state = {
       ...state,
-      customBathrooms: [...state.customBathrooms, custom],
+      customBathrooms: API?.isConfigured?.() ? state.customBathrooms : [...state.customBathrooms, created],
+      remoteBathrooms: API?.isConfigured?.() ? [created, ...(state.remoteBathrooms || [])] : state.remoteBathrooms,
       unlockedBadges: [...new Set([...(state.unlockedBadges || []), 'hidden-gem-hunter'])],
-      selectedBathroomId: custom.id,
+      selectedBathroomId: created.id,
       modal: null,
       activeTab: 'map'
     };
     persist();
     render();
-    toast('Bathroom added', 'Hidden Gem Hunter progress started.');
+    toast('Bathroom added', API?.isConfigured?.() ? 'Saved to Supabase as pending. Hidden Gem Hunter progress started.' : 'Hidden Gem Hunter progress started.');
   }
 
   function updateBadges(checkins) {
@@ -1027,4 +1288,5 @@
   }
 
   render();
+  initSupabase();
 })();
