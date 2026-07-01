@@ -192,7 +192,9 @@ from public.bathrooms b
 left join public.ratings r on r.bathroom_id = b.id
 group by b.id;
 
-create or replace view public.bathroom_cards as
+create or replace view public.bathroom_cards
+with (security_invoker = true)
+as
 select
   b.*,
   coalesce(s.rating_count, 0) as rating_count,
@@ -212,7 +214,8 @@ left join (
   from public.photos
   where moderation_status in ('pending','approved')
   group by bathroom_id
-) p on p.bathroom_id = b.id;
+) p on p.bathroom_id = b.id
+where b.moderation_status in ('approved','pending');
 
 -- ---------- RLS ----------
 -- Drop policies first so this file can be re-run safely during development.
