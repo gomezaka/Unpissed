@@ -21,6 +21,12 @@
     routeBathroomId: null,
     authUser: null,
     authProfile: null,
+    authMode: 'signin',
+    authEmail: '',
+    authDisplayName: '',
+    authError: '',
+    authNotice: '',
+    authSubmitting: false,
     backendStatus: API?.isConfigured?.() ? 'ready' : 'missing',
     syncMessage: API?.isConfigured?.() ? 'Supabase is configured. Sign in to add and rate bathrooms.' : 'Supabase configuration is missing.',
     bathrooms: [],
@@ -881,18 +887,23 @@
       return renderModalShell('Account', 'Supabase session is active.', body);
     }
 
+    const mode = state.authMode === 'signup' ? 'signup' : 'signin';
+    const isSignup = mode === 'signup';
     const body = `
       <form class="auth-form" data-form="auth">
-        <label class="form-field"><span>Email</span><input name="email" type="email" required autocomplete="email" /></label>
-        <label class="form-field"><span>Password</span><input name="password" type="password" required autocomplete="current-password" minlength="6" /></label>
-        <label class="form-field"><span>Display name</span><input name="displayName" autocomplete="nickname" placeholder="Only needed for sign up" /></label>
-        <div class="two-button-row">
-          <button class="primary-button" type="submit" name="mode" value="signin">Sign in</button>
-          <button class="secondary-button" type="submit" name="mode" value="signup">Create account</button>
+        <div class="auth-mode-toggle" role="tablist" aria-label="Account mode">
+          <button type="button" class="${!isSignup ? 'is-active' : ''}" data-action="set-auth-mode" data-auth-mode="signin" role="tab" aria-selected="${!isSignup}">Sign in</button>
+          <button type="button" class="${isSignup ? 'is-active' : ''}" data-action="set-auth-mode" data-auth-mode="signup" role="tab" aria-selected="${isSignup}">Create account</button>
         </div>
+        ${state.authNotice ? `<div class="auth-notice" role="status">${escapeHtml(state.authNotice)}</div>` : ''}
+        ${state.authError ? `<div class="auth-error" role="alert">${escapeHtml(state.authError)}</div>` : ''}
+        <label class="form-field"><span>Email</span><input name="email" type="email" required autocomplete="email" value="${escapeHtml(state.authEmail || '')}" /></label>
+        <label class="form-field"><span>Password</span><input name="password" type="password" required autocomplete="${isSignup ? 'new-password' : 'current-password'}" minlength="6" /></label>
+        ${isSignup ? `<label class="form-field"><span>Display name</span><input name="displayName" autocomplete="nickname" placeholder="Optional" value="${escapeHtml(state.authDisplayName || '')}" /><small>Shown on non-anonymous activity.</small></label>` : ''}
+        <button class="primary-button full-width" type="submit" name="mode" value="${mode}" ${state.authSubmitting ? 'disabled' : ''}>${state.authSubmitting ? 'Working...' : (isSignup ? 'Create account' : 'Sign in')}</button>
       </form>
     `;
-    return renderModalShell('Sign in', 'Save check-ins, photos and badge progress.', body);
+    return renderModalShell(isSignup ? 'Create account' : 'Sign in', 'Save check-ins, photos and badge progress.', body);
   }
 
   function renderNotificationsModal() {
@@ -963,7 +974,15 @@
         setState({ modal: 'notifications' });
         break;
       case 'open-auth':
-        setState({ modal: 'auth' });
+        setState({ modal: 'auth', authError: '', authNotice: '', authSubmitting: false });
+        break;
+      case 'set-auth-mode':
+        setState({
+          authMode: element.dataset.authMode === 'signup' ? 'signup' : 'signin',
+          authError: '',
+          authNotice: '',
+          authSubmitting: false
+        });
         break;
       case 'sync-supabase':
         await syncSupabase();
@@ -1269,37 +1288,81 @@
     }
   }
 
+  function authErrorMessage(error, mode) {
+    const message = String(error?.message || 'Authentication failed.');
+    const lower = message.toLowerCase();
+    if (lower.includes('invalid login credentials')) return 'Email or password is incorrect.';
+    if (lower.includes('email not confirmed')) return 'Confirm your email before signing in.';
+    if (lower.includes('user already registered') || lower.includes('already registered')) return 'That email already has an account. Sign in instead.';
+    if (lower.includes('password')) return message;
+    if (lower.includes('row-level security')) {
+      return mode === 'signup'
+        ? 'Account was created, but your profile could not be saved yet. Confirm your email and sign in.'
+        : 'Your account is signed in, but profile access is blocked by Supabase policy.';
+    }
+    return message;
+  }
+
   async function handleAuthSubmit(event) {
     event.preventDefault();
     if (!API?.isConfigured?.()) return;
     const submitter = event.submitter;
-    const mode = submitter?.value || 'signin';
+    const mode = state.authMode === 'signup' || submitter?.value === 'signup' ? 'signup' : 'signin';
     const formData = new FormData(event.currentTarget);
     const email = String(formData.get('email') || '').trim();
     const password = String(formData.get('password') || '');
     const displayName = String(formData.get('displayName') || '').trim();
     if (!email || !password) return;
 
+    state = {
+      ...state,
+      authEmail: email,
+      authDisplayName: displayName,
+      authError: '',
+      authNotice: '',
+      authSubmitting: true
+    };
+    render();
+
     try {
       const result = mode === 'signup'
         ? await API.signUp(email, password, displayName)
         : await API.signIn(email, password);
       const currentSession = await API.getSession();
-      const user = currentSession.user || result.session?.user || result.user || null;
+      const user = currentSession.user || result.session?.user || null;
+      if (mode === 'signup' && !user) {
+        setState({
+          authMode: 'signin',
+          authSubmitting: false,
+          authError: '',
+          authNotice: 'Check your email to confirm the account, then sign in.',
+          syncMessage: 'Check your email to confirm the account, then sign in.'
+        });
+        return;
+      }
       const profile = user ? await API.ensureProfile(user, displayName) : null;
       state = {
         ...state,
         authUser: user,
         authProfile: profile,
         modal: null,
+        authEmail: '',
+        authDisplayName: '',
+        authError: '',
+        authNotice: '',
+        authSubmitting: false,
         backendStatus: user ? 'live' : 'ready',
-        syncMessage: user ? 'Signed in. Supabase writes are active.' : 'Check your email to confirm the account, then sign in.'
+        syncMessage: 'Signed in. Supabase writes are active.'
       };
       render();
-      toast(user ? 'Signed in' : 'Check your email', state.syncMessage);
+      toast('Signed in', state.syncMessage);
       await syncSupabase({ silent: true });
     } catch (error) {
-      toast(mode === 'signup' ? 'Sign up failed' : 'Sign in failed', error.message);
+      setState({
+        authSubmitting: false,
+        authNotice: '',
+        authError: authErrorMessage(error, mode)
+      });
     }
   }
 
