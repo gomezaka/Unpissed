@@ -390,29 +390,6 @@ textarea:focus-visible {
   color: var(--gold);
 }
 
-.add-throne {
-  position: absolute;
-  left: 14px;
-  bottom: 14px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 9px 11px;
-  border-radius: 999px;
-  background: rgba(12, 15, 24, 0.7);
-  backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.13);
-  color: var(--text);
-  font-size: 12.5px;
-  font-weight: 600;
-}
-
-.add-throne span {
-  color: var(--brand-bright);
-  font-family: "Space Mono", monospace;
-  font-weight: 700;
-}
-
 .recenter {
   position: absolute;
   right: 14px;
@@ -1835,8 +1812,6 @@ textarea:focus-visible {
   background: #111725;
 }
 
-.map-card--leaflet .map-empty,
-.map-card--leaflet .add-throne,
 .map-card--leaflet .recenter {
   z-index: 500;
 }

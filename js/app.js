@@ -129,10 +129,8 @@
     });
   }
 
-  function selectedBathroom() {
-    const all = bathrooms();
-    const visible = filteredBathrooms();
-    return all.find((b) => b.id === state.selectedBathroomId) || visible[0] || all[0] || null;
+  function selectedMapBathroom() {
+    return bathrooms().find((b) => b.id === state.selectedBathroomId) || null;
   }
 
   function icon(name) {
@@ -318,7 +316,8 @@
   }
 
   function renderMapPage() {
-    const bathroom = selectedBathroom();
+    const bathroom = selectedMapBathroom();
+    const hasBathrooms = bathrooms().length > 0;
     return `
       <button class="emergency-card" data-action="open-emergency">
         <div>
@@ -337,7 +336,7 @@
       </div>
       ${renderMap()}
       ${renderNearbyList()}
-      ${bathroom ? renderBathroomCard(bathroom) : renderNoBathroomsCard()}
+      ${bathroom ? renderBathroomCard(bathroom) : (hasBathrooms ? renderChooseMapFlagCard() : renderNoBathroomsCard())}
       ${renderTrustCard()}
 
       <div class="section-row">
@@ -397,10 +396,10 @@
     return `
       <div class="nearby-rail" aria-label="Nearby bathrooms">
         ${visible.map((bathroom) => `
-          <button class="nearby-pill ${bathroom.id === selectedBathroom()?.id ? 'is-active' : ''}" data-select-bathroom="${bathroom.id}">
+          <div class="nearby-pill ${bathroom.id === state.selectedBathroomId ? 'is-active' : ''}">
             <b>${escapeHtml(bathroom.name)}</b>
             <span>${rounded(bathroom.rating)} ★ · ${escapeHtml(distanceLabel(bathroom))}</span>
-          </button>
+          </div>
         `).join('')}
       </div>
     `;
@@ -412,9 +411,8 @@
         <div>
           <p class="card-kicker">Photo rules</p>
           <h3>Show the vibe, not the victims.</h3>
-          <p>No people, no nudity, no disasters. Useful photos only.</p>
+          <p>Photos belong in check-ins. No people, no nudity, no disasters.</p>
         </div>
-        <button class="secondary-button" data-action="open-add-bathroom">Add throne</button>
       </article>
     `;
   }
@@ -449,18 +447,9 @@
   }
 
   function renderMap() {
-    const visibleBathrooms = filteredBathrooms();
-    const mappedCount = visibleBathrooms.filter(hasCoordinates).length;
-    const emptyText = visibleBathrooms.length
-      ? `${visibleBathrooms.length - mappedCount} bathroom${visibleBathrooms.length - mappedCount === 1 ? '' : 's'} need coordinates.`
-      : 'No bathrooms mapped yet.';
-    const emptyState = mappedCount ? '' : `<div class="map-empty">${escapeHtml(emptyText)}</div>`;
-
     return `
       <div class="map-card map-card--leaflet">
         <div id="unpissed-map" class="leaflet-map" aria-label="Interactive map with nearby bathrooms"></div>
-        ${emptyState}
-        <button class="add-throne" data-action="open-add-bathroom"><span>+</span> Add this throne to the map</button>
         <button class="recenter" data-action="recenter" aria-label="Use current location">${icon('locate')}</button>
       </div>
     `;
@@ -471,10 +460,18 @@
       <article class="card selected-card">
         <div class="selected-body empty-state">
           <h2>No bathrooms yet</h2>
-          <p>Your Supabase database is connected, but no bathrooms are mapped. Add the first throne to start building the city.</p>
+          <p>Your Supabase database is connected, but there are no bathrooms available yet. Check-ins will appear here when there is something to rate.</p>
         </div>
-        <div class="card-actions">
-          <button class="primary-button full-width" data-action="open-add-bathroom">Add first bathroom</button>
+      </article>
+    `;
+  }
+
+  function renderChooseMapFlagCard() {
+    return `
+      <article class="card selected-card">
+        <div class="selected-body empty-state">
+          <h2>Choose a bathroom</h2>
+          <p>Select a registered bathroom marker on the map before checking in.</p>
         </div>
       </article>
     `;
@@ -601,12 +598,13 @@
   }
 
   function renderCheckinPage() {
-    const bathroom = selectedBathroom();
+    const bathroom = selectedMapBathroom();
+    const hasBathrooms = bathrooms().length > 0;
     return `
       <section class="content-page">
         <h2 class="page-title">Check In</h2>
         <p class="page-subtitle">You survived. How was it?</p>
-        ${bathroom ? renderBathroomCard(bathroom) : renderNoBathroomsCard()}
+        ${bathroom ? renderBathroomCard(bathroom) : (hasBathrooms ? renderChooseMapFlagCard() : renderNoBathroomsCard())}
         <div style="height:14px"></div>
         ${bathroom ? `<button class="primary-button full-width" data-action="open-checkin" data-bathroom-id="${bathroom.id}">Rate the relief</button>` : ''}
       </section>
@@ -753,13 +751,13 @@
           </article>
         `).join('')}
       </div>
-    ` : '<div class="empty-state">No bathrooms are mapped yet. Add one first.</div>';
+    ` : '<div class="empty-state">No bathrooms are available yet.</div>';
     return renderModalShell('Emergency Mode', 'Find the closest usable option.', body);
   }
 
   function renderCheckinModal() {
-    const bathroom = bathrooms().find((b) => b.id === state.checkinBathroomId) || selectedBathroom();
-    if (!bathroom) return renderModalShell('Check in', 'No bathroom selected.', '<div class="empty-state">Add a bathroom before checking in.</div>');
+    const bathroom = bathrooms().find((b) => b.id === state.checkinBathroomId);
+    if (!bathroom) return renderModalShell('Check in', 'No bathroom selected.', '<div class="empty-state">Choose a registered bathroom on the map before checking in.</div>');
     const criteriaRows = Object.entries(CRITERIA_LABELS).map(([key, label]) => `
       <label class="range-row">
         <span>${escapeHtml(label)}</span>
@@ -795,8 +793,8 @@
   }
 
   function renderDetailsModal() {
-    const bathroom = selectedBathroom();
-    if (!bathroom) return renderModalShell('Bathroom details', 'No bathroom selected.', '<div class="empty-state">No bathrooms are mapped yet.</div>');
+    const bathroom = selectedMapBathroom();
+    if (!bathroom) return renderModalShell('Bathroom details', 'No bathroom selected.', '<div class="empty-state">No bathrooms are available yet.</div>');
     const allCriteria = Object.entries(CRITERIA_LABELS).map(([key, label]) => {
       const value = bathroom.criteria?.[key] || 0;
       return `<div class="rating-row"><span class="rating-row__label">${escapeHtml(label)}</span><span class="rating-track"><span class="rating-fill" style="width:${Math.min(value * 20, 100)}%"></span></span><span class="rating-value">${rounded(value)}</span></div>`;
@@ -925,12 +923,6 @@
       });
     });
 
-    document.querySelectorAll('[data-select-bathroom]').forEach((element) => {
-      element.addEventListener('click', () => {
-        setState({ selectedBathroomId: element.dataset.selectBathroom });
-      });
-    });
-
     document.querySelectorAll('[data-action]').forEach((element) => {
       element.addEventListener('click', async (event) => {
         const panel = event.target.closest('[data-modal-panel]');
@@ -961,7 +953,15 @@
           setState({ modal: 'auth' });
           return;
         }
-        setState({ modal: 'checkin', checkinBathroomId: element.dataset.bathroomId || selectedBathroom()?.id });
+        {
+          const bathroomId = element.dataset.bathroomId || state.selectedBathroomId;
+          if (!bathroomId) {
+            toast('Choose a bathroom', 'Select a registered bathroom marker on the map before checking in.');
+            setState({ activeTab: 'map', modal: null });
+            return;
+          }
+          setState({ modal: 'checkin', checkinBathroomId: bathroomId });
+        }
         break;
       case 'open-details':
         setState({ modal: 'details', selectedBathroomId: element.dataset.bathroomId || state.selectedBathroomId });
@@ -1068,7 +1068,7 @@
       routeLine = null;
     }
 
-    const selected = selectedBathroom();
+    const selected = selectedMapBathroom();
     const firstMapped = sortedByDistance(filteredBathrooms()).find(hasCoordinates);
     const startCenter = state.userLocation
       ? [state.userLocation.lat, state.userLocation.lng]
@@ -1094,7 +1094,7 @@
     markerLayer.clearLayers();
     const markers = [];
     filteredBathrooms().filter(hasCoordinates).forEach((bathroom) => {
-      const isActive = bathroom.id === selectedBathroom()?.id;
+      const isActive = bathroom.id === state.selectedBathroomId;
       const marker = window.L.marker([Number(bathroom.lat), Number(bathroom.lng)], {
         title: bathroom.name,
         icon: window.L.divIcon({
@@ -1172,17 +1172,12 @@
             accuracy: position.coords.accuracy,
             updatedAt: new Date().toISOString()
           };
-          const nearestId = sortedByDistance((state.bathrooms || []).map((bathroom) => {
-            const km = distanceKmBetween(nextLocation, bathroom);
-            return Number.isFinite(km) ? { ...bathroom, distanceKm: km, distanceMinutes: walkingMinutes(km) } : bathroom;
-          }))[0]?.id;
           state = {
             ...state,
             userLocation: nextLocation,
             geoStatus: 'ready',
             geoError: '',
             mapHasMoved: false,
-            selectedBathroomId: nearestId || state.selectedBathroomId,
             syncMessage: 'Location active. Bathrooms are sorted by walking distance.'
           };
           render();
@@ -1241,6 +1236,7 @@
       ]);
       const checkins = state.authUser ? await API.listMyCheckins(state.authUser.id) : [];
       const userBadges = state.authUser ? await API.listUserBadges(state.authUser.id) : [];
+      const selectedStillExists = remoteBathrooms.some((item) => item.id === state.selectedBathroomId);
       state = {
         ...state,
         bathrooms: remoteBathrooms,
@@ -1250,7 +1246,7 @@
         userBadges,
         loading: false,
         backendStatus: state.authUser ? 'live' : 'ready',
-        selectedBathroomId: state.selectedBathroomId || sortedByDistance(remoteBathrooms.map((item) => applyDistance(item)))[0]?.id || remoteBathrooms[0]?.id || null,
+        selectedBathroomId: selectedStillExists ? state.selectedBathroomId : null,
         syncMessage: `${remoteBathrooms.length} bathrooms loaded from Supabase.`
       };
       render();
@@ -1283,7 +1279,7 @@
   }
 
   async function reportPrivacyIssue() {
-    const bathroom = selectedBathroom();
+    const bathroom = selectedMapBathroom();
     if (!bathroom) return;
     try {
       await API.reportPrivacyIssue({ bathroomId: bathroom.id, reason: 'privacy_issue' }, state.authUser?.id || null);
@@ -1375,17 +1371,13 @@
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     const query = String(formData.get('query') || '').trim();
-    const nextVisible = bathrooms().filter((bathroom) => {
-      const haystack = [bathroom.name, bathroom.type, bathroom.access, ...(bathroom.tags || []), ...(bathroom.facilities || []), ...(bathroom.vibeTags || [])].join(' ').toLowerCase();
-      return !query || haystack.includes(query.toLowerCase());
-    });
-    setState({ searchQuery: query, selectedBathroomId: nextVisible[0]?.id || state.selectedBathroomId });
+    setState({ searchQuery: query });
   }
 
   async function handleCheckinSubmit(event) {
     event.preventDefault();
     const form = event.currentTarget;
-    const bathroom = bathrooms().find((b) => b.id === state.checkinBathroomId) || selectedBathroom();
+    const bathroom = bathrooms().find((b) => b.id === state.checkinBathroomId);
     if (!bathroom || !state.authUser) return;
     const formData = new FormData(form);
     const criteria = {};
