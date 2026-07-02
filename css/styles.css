@@ -299,6 +299,14 @@ textarea:focus-visible {
   color: var(--muted);
 }
 
+.page-action-row {
+  margin: 12px 0 14px;
+}
+
+.register-toilet-button {
+  min-height: 42px;
+}
+
 .map-card {
   height: 230px;
   border-radius: 22px;
@@ -833,6 +841,136 @@ textarea:focus-visible {
   min-height: 92px;
 }
 
+.facility-preset-field {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.facility-preset-field legend {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-family: "Space Mono", monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.facility-chip-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.facility-chip {
+  min-width: 0;
+  position: relative;
+  display: block;
+}
+
+.facility-chip input {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.facility-chip span {
+  position: relative;
+  z-index: 1;
+  min-height: 54px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  color: var(--text);
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-areas:
+    "icon label"
+    "icon note";
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 2px;
+  padding: 7px 10px;
+  pointer-events: none;
+}
+
+.facility-chip svg {
+  grid-area: icon;
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  color: var(--brand-bright);
+}
+
+.facility-chip b,
+.facility-chip small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.facility-chip b {
+  grid-area: label;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.05;
+}
+
+.facility-chip small {
+  grid-area: note;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.05;
+}
+
+.facility-chip input:checked + span {
+  border-color: rgba(106, 162, 255, 0.66);
+  background: rgba(78, 125, 255, 0.22);
+  color: #e8efff;
+}
+
+.facility-chip input:checked + span small {
+  color: #cbd8ff;
+}
+
+.facility-chip input:focus-visible + span {
+  outline: 2px solid var(--brand-bright);
+  outline-offset: 2px;
+}
+
+.issue-preset-field legend {
+  color: #ffb8c5;
+}
+
+.issue-chip span {
+  background: rgba(255, 95, 121, 0.08);
+  border-color: rgba(255, 95, 121, 0.2);
+}
+
+.issue-chip svg {
+  color: #ff8ca0;
+}
+
+.issue-chip input:checked + span {
+  border-color: rgba(255, 95, 121, 0.72);
+  background: rgba(255, 95, 121, 0.18);
+  color: #ffe8ed;
+}
+
+.issue-chip input:checked + span small {
+  color: #ffc4ce;
+}
+
 .rating-input-row {
   display: grid;
   grid-template-columns: 1fr 122px 28px;
@@ -960,6 +1098,19 @@ textarea:focus-visible {
 
 .modal-body {
   padding: 10px 18px 18px;
+}
+
+.modal--register {
+  overscroll-behavior: contain;
+}
+
+.modal--register .modal-body {
+  padding-top: 0;
+}
+
+.modal--register .add-form {
+  display: grid;
+  gap: 13px;
 }
 
 .auth-form {
@@ -1532,6 +1683,17 @@ textarea:focus-visible {
   transform: translateY(1px);
 }
 
+.closest-row.is-active {
+  border-color: rgba(106, 162, 255, 0.7);
+  background: linear-gradient(135deg, rgba(78, 125, 255, 0.18), rgba(28, 34, 49, 0.95));
+}
+
+.closest-row.is-active .closest-rank,
+.closest-row.is-active .closest-meta {
+  background: rgba(106, 162, 255, 0.24);
+  color: #dce8ff;
+}
+
 .closest-rank {
   width: 34px;
   height: 34px;
@@ -1975,6 +2137,46 @@ textarea:focus-visible {
   z-index: 500;
 }
 
+.registration-location-panel {
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  display: grid;
+  gap: 10px;
+  padding: 10px 0 12px;
+  background: linear-gradient(180deg, var(--bg) 0%, var(--bg) calc(100% - 14px), rgba(15, 18, 28, 0));
+}
+
+.registration-map-card {
+  position: relative;
+  height: clamp(155px, 28dvh, 230px);
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #111725;
+}
+
+.registration-map {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: #111725;
+}
+
+.registration-map__hint {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  z-index: 500;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(9, 11, 17, 0.74);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text);
+  font-size: 11px;
+  font-family: "Space Mono", ui-monospace, monospace;
+}
+
 .map-card--leaflet .leaflet-control-attribution {
   background: rgba(9, 11, 17, 0.72);
   color: rgba(246, 248, 255, 0.75);
@@ -1983,6 +2185,17 @@ textarea:focus-visible {
 }
 
 .map-card--leaflet .leaflet-control-attribution a {
+  color: var(--brand-bright);
+}
+
+.registration-map-card .leaflet-control-attribution {
+  background: rgba(9, 11, 17, 0.72);
+  color: rgba(246, 248, 255, 0.75);
+  border-radius: 10px 0 0 0;
+  font-size: 10px;
+}
+
+.registration-map-card .leaflet-control-attribution a {
   color: var(--brand-bright);
 }
 
@@ -2043,6 +2256,30 @@ textarea:focus-visible {
   border-radius: 50%;
   background: var(--brand-bright);
   border: 2px solid #fff;
+}
+
+.registration-location-pin {
+  width: 34px;
+  height: 34px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: var(--brand);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: 0 14px 24px -12px rgba(78, 125, 255, 0.8);
+}
+
+.registration-location-pin::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  width: 2px;
+  height: 10px;
+  background: currentColor;
+  transform: translateX(-50%);
+  opacity: 0.72;
 }
 
 .location-capture {

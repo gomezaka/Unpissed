@@ -1,14 +1,90 @@
 (() => {
   const config = window.UNPISSED_CONFIG || {};
+  const PAGE_SIZE = 1000;
+  const REQUEST_TIMEOUT_MS = Number(config.SUPABASE_REQUEST_TIMEOUT_MS || 12000);
+  const PLACEHOLDER_VALUES = new Set([
+    'https://your-project-ref.supabase.co',
+    'https://your_project.supabase.co',
+    'your-supabase-anon-key',
+    'your_anon_or_publishable_key'
+  ]);
   let client = null;
 
+  function cleanValue(value) {
+    return String(value || '').trim();
+  }
+
+  function hasRealValue(value) {
+    const cleaned = cleanValue(value).toLowerCase();
+    return Boolean(cleaned) && !PLACEHOLDER_VALUES.has(cleaned);
+  }
+
+  function configurationStatus() {
+    if (!config.ENABLE_SUPABASE) {
+      return {
+        ok: false,
+        reason: 'disabled',
+        title: 'Supabase disabled',
+        message: 'Supabase is disabled in js/config.js.'
+      };
+    }
+    if (!hasRealValue(config.SUPABASE_URL) || !hasRealValue(config.SUPABASE_ANON_KEY)) {
+      return {
+        ok: false,
+        reason: 'missing-credentials',
+        title: 'Supabase credentials missing',
+        message: 'Add your Supabase URL and anon key in js/config.js.'
+      };
+    }
+    if (!window.supabase?.createClient) {
+      return {
+        ok: false,
+        reason: 'missing-library',
+        title: 'Supabase library did not load',
+        message: 'Check the connection to the Supabase CDN, then reload the app.'
+      };
+    }
+    return {
+      ok: true,
+      reason: 'ready',
+      title: 'Supabase ready',
+      message: 'Supabase is configured.'
+    };
+  }
+
   function isConfigured() {
-    return Boolean(
-      config.ENABLE_SUPABASE &&
-      config.SUPABASE_URL &&
-      config.SUPABASE_ANON_KEY &&
-      window.supabase?.createClient
-    );
+    return configurationStatus().ok;
+  }
+
+  async function fetchWithTimeout(input, init = {}) {
+    if (!Number.isFinite(REQUEST_TIMEOUT_MS) || REQUEST_TIMEOUT_MS <= 0) {
+      return fetch(input, init);
+    }
+
+    const controller = new AbortController();
+    const upstreamSignal = init.signal;
+    let timedOut = false;
+
+    const abortFromUpstream = () => controller.abort();
+    if (upstreamSignal?.aborted) controller.abort();
+    upstreamSignal?.addEventListener?.('abort', abortFromUpstream, { once: true });
+
+    const timer = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, REQUEST_TIMEOUT_MS);
+
+    try {
+      return await fetch(input, { ...init, signal: controller.signal });
+    } catch (error) {
+      if (timedOut) {
+        throw new Error(`Supabase request timed out after ${Math.round(REQUEST_TIMEOUT_MS / 1000)} seconds.`);
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timer);
+      upstreamSignal?.removeEventListener?.('abort', abortFromUpstream);
+    }
   }
 
   function getClient() {
@@ -19,6 +95,9 @@
           persistSession: true,
           autoRefreshToken: true,
           detectSessionInUrl: true
+        },
+        global: {
+          fetch: fetchWithTimeout
         }
       });
     }
@@ -214,24 +293,41 @@
     return data;
   }
 
+  async function fetchAllRows(table, options = {}) {
+    const supabase = getClient();
+    if (!supabase) return [];
+    const rows = [];
+    const pageSize = Number(options.pageSize || PAGE_SIZE);
+    const orders = options.orders || [{ column: 'created_at', ascending: false }];
+
+    for (let from = 0; ; from += pageSize) {
+      let query = supabase.from(table).select(options.select || '*');
+      orders.forEach((order) => {
+        query = query.order(order.column, { ascending: Boolean(order.ascending) });
+      });
+
+      const { data, error } = await query.range(from, from + pageSize - 1);
+      if (error) throw error;
+
+      const page = Array.isArray(data) ? data : [];
+      rows.push(...page);
+      if (page.length < pageSize) break;
+    }
+
+    return rows;
+  }
+
   async function listBathrooms() {
     const supabase = getClient();
     if (!supabase) return [];
-    const viewResult = await supabase
-      .from('bathroom_cards')
-      .select('*')
-      .order('created_at', { ascending: false });
 
-    if (!viewResult.error && Array.isArray(viewResult.data)) {
-      return viewResult.data.map(mapBathroom);
+    try {
+      const viewRows = await fetchAllRows('bathroom_cards');
+      return viewRows.map(mapBathroom);
+    } catch {
+      const rows = await fetchAllRows('bathrooms');
+      return rows.map(mapBathroom);
     }
-
-    const { data, error } = await supabase
-      .from('bathrooms')
-      .select('*')
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    return (data || []).map(mapBathroom);
   }
 
   async function listBadges() {
@@ -578,6 +674,7 @@
 
   window.UnpissedSupabase = {
     isConfigured,
+    configurationStatus,
     getClient,
     getSession,
     signIn,

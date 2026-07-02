@@ -39,21 +39,25 @@ supabase/seed.sql
 
 This only adds the app's badge definitions. It does not add fake bathrooms.
 
-## 4. Remove old demo bathrooms if needed
+## 4. Import city seed files
 
-If you previously ran the v0.4 seed with fake bathrooms, run:
+Run any city seed files you want to import. Then run:
 
 ```text
-supabase/cleanup_demo_data.sql
+supabase/fix_visible_unused_bathrooms.sql
 ```
 
-This removes the old demo rows:
+Verify with:
 
-- The Fox & Barrel
-- Neon Noodle Club
-- Metro Arcade Hall
-- Civic Square Restroom
-- Velvet Basement
+```text
+supabase/debug_bathroom_visibility.sql
+```
+
+The full SQL runbook is in:
+
+```text
+supabase/RUNBOOK.md
+```
 
 ## 5. Configure frontend
 

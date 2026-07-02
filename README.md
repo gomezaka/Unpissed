@@ -66,7 +66,11 @@ Run in Supabase SQL Editor:
 
 1. `supabase/schema.sql`
 2. `supabase/seed.sql` for default badges only
-3. Optional: `supabase/cleanup_demo_data.sql` if you previously inserted v0.4 demo bathrooms
+3. Any city seed files you want to import
+4. `supabase/fix_visible_unused_bathrooms.sql`
+5. `supabase/debug_bathroom_visibility.sql` to verify the result
+
+The full SQL runbook is in `supabase/RUNBOOK.md`.
 
 Existing bathrooms without coordinates still show in lists, but they will not appear as map pins until `lat` and `lng` are set.
 

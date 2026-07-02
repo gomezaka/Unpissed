@@ -94,6 +94,8 @@ end;
 $$;
 
 create index if not exists bathrooms_lat_lng_idx on public.bathrooms (lat, lng);
+create index if not exists bathrooms_country_city_idx on public.bathrooms (country, city);
+create index if not exists bathrooms_moderation_status_idx on public.bathrooms (moderation_status);
 
 -- ---------- checkins and ratings ----------
 create table if not exists public.checkins (
@@ -351,7 +353,9 @@ revoke all on function public.create_checkin_with_rating(uuid, boolean, text, nu
 grant execute on function public.create_checkin_with_rating(uuid, boolean, text, numeric, numeric, numeric, numeric, numeric, numeric, numeric) to authenticated;
 
 -- ---------- read model for the static app ----------
-create or replace view public.bathroom_rating_summary as
+create or replace view public.bathroom_rating_summary
+with (security_invoker = true)
+as
 select
   b.id as bathroom_id,
   count(r.id) as rating_count,
@@ -391,6 +395,13 @@ left join (
   group by bathroom_id
 ) p on p.bathroom_id = b.id
 where b.moderation_status in ('approved','unused');
+
+grant usage on schema public to anon, authenticated;
+grant select on public.bathrooms to anon, authenticated;
+grant select on public.ratings to anon, authenticated;
+grant select on public.photos to anon, authenticated;
+grant select on public.bathroom_rating_summary to anon, authenticated;
+grant select on public.bathroom_cards to anon, authenticated;
 
 -- ---------- RLS ----------
 -- Drop policies first so this file can be re-run safely during development.

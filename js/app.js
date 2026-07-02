@@ -1,5 +1,8 @@
 (() => {
   const API = window.UnpissedSupabase;
+  const STARTUP_WAIT_MS = 8000;
+  const STARTUP_TIMEOUT_MS = 14000;
+  const MAP_MARKER_LIMIT = 150;
 
   const CRITERIA_LABELS = {
     cleanliness: 'Cleanliness',
@@ -10,6 +13,35 @@
     essentials: 'Essentials',
     soundSafety: 'Sound Safety'
   };
+
+  const FACILITY_PRESETS = [
+    { value: 'Toilet paper', label: 'Paper fortress', note: 'Backup rolls', icon: 'paper' },
+    { value: 'Good soap', label: 'Soap flex', note: 'Not sad foam', icon: 'soap' },
+    { value: 'Mirror', label: 'Main mirror', note: 'Fit check ready', icon: 'mirror' },
+    { value: 'Bag hook', label: 'Hero hook', note: 'Bag off floor', icon: 'hook' },
+    { value: 'Working lock', label: 'Trusty lock', note: 'Real privacy', icon: 'lock' },
+    { value: 'Sink', label: 'Actual sink', note: 'Works properly', icon: 'sink' },
+    { value: 'Hand dryer', label: 'Turbo dryer', note: 'Hands survive', icon: 'dryer' },
+    { value: 'Good lighting', label: 'Golden light', note: 'No cave vibe', icon: 'light' },
+    { value: 'Sound cover', label: 'Sound cover', note: 'Music or fan', icon: 'music' },
+    { value: 'Ventilation', label: 'Air rescue', note: 'Fresh exit', icon: 'air' },
+    { value: 'Period products', label: 'Period rescue', note: 'Actual care', icon: 'period' },
+    { value: 'Changing table', label: 'Baby pit stop', note: 'Parent friendly', icon: 'baby' },
+    { value: 'Accessible', label: 'Access hero', note: 'Wheelchair room', icon: 'accessible' },
+    { value: 'Shower', label: 'Shower bonus', note: 'Rare find', icon: 'shower' },
+    { value: 'Outdoor', label: 'Forest mode', note: 'Wild relief', icon: 'forest' }
+  ];
+
+  const PROBLEM_PRESETS = [
+    { value: 'Privacy hazard', label: 'Privacy hazard', note: 'Suspicious holes', icon: 'shield' },
+    { value: 'Broken lock', label: 'Door roulette', note: 'Lock fails', icon: 'lock' },
+    { value: 'No toilet paper', label: 'Paper panic', note: 'No rolls', icon: 'paper' },
+    { value: 'No soap', label: 'Soap desert', note: 'No clean exit', icon: 'soap' },
+    { value: 'Dirty', label: 'Floor quest', note: 'Needs mercy', icon: 'warning' },
+    { value: 'Bad ventilation', label: 'Air defeat', note: 'Vent lost', icon: 'air' },
+    { value: 'Graffiti', label: 'Wall lore', note: 'Graffiti chaos', icon: 'tag' },
+    { value: 'Rival team sticker', label: 'Wrong team', note: 'Sticker betrayal', icon: 'flag' }
+  ];
 
   const COUNTRY_BADGE_IDS = {
     norge: 'country-norway',
@@ -65,7 +97,7 @@
     authNotice: '',
     authSubmitting: false,
     backendStatus: API?.isConfigured?.() ? 'ready' : 'missing',
-    syncMessage: API?.isConfigured?.() ? 'Supabase is configured. Sign in to add and rate bathrooms.' : 'Supabase configuration is missing.',
+    syncMessage: API?.configurationStatus?.().message || (API?.isConfigured?.() ? 'Supabase is configured. Sign in to add and rate bathrooms.' : 'Supabase configuration is missing.'),
     bathrooms: [],
     checkins: [],
     badges: [],
@@ -85,6 +117,9 @@
     userLocation: null,
     geoStatus: 'idle',
     geoError: '',
+    addBathroomLocation: null,
+    addBathroomPlace: null,
+    addBathroomGeocoding: false,
     mapHasMoved: false,
     mapVisible: false
   };
@@ -95,10 +130,58 @@
   let userMarker = null;
   let routeLine = null;
   let mapRenderTimer = null;
+  let addBathroomMap = null;
+  let addBathroomMarker = null;
+  let addBathroomMapRenderTimer = null;
 
   function setState(patch) {
     state = { ...state, ...patch };
     render();
+  }
+
+  function getConfigurationStatus() {
+    return API?.configurationStatus?.() || {
+      ok: false,
+      reason: 'missing-api',
+      title: 'App files did not load',
+      message: 'Reload the app. js/supabase-api.js is not available.'
+    };
+  }
+
+  function errorMessage(error, fallback = 'Something went wrong.') {
+    return String(error?.message || error || fallback);
+  }
+
+  function wait(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  async function waitForSupabaseLibrary() {
+    if (API?.isConfigured?.()) return true;
+    if (getConfigurationStatus().reason !== 'missing-library') return false;
+    if (window.UnpissedSupabaseVendorReady?.then) {
+      await Promise.race([
+        window.UnpissedSupabaseVendorReady.catch(() => false),
+        wait(STARTUP_WAIT_MS)
+      ]);
+    } else {
+      await wait(STARTUP_WAIT_MS);
+    }
+    return Boolean(API?.isConfigured?.());
+  }
+
+  async function withTimeout(promise, ms, label) {
+    let timeoutId;
+    const timeout = new Promise((_, reject) => {
+      timeoutId = window.setTimeout(() => {
+        reject(new Error(`${label} timed out after ${Math.round(ms / 1000)} seconds.`));
+      }, ms);
+    });
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
   }
 
   function hasCoordinates(bathroom) {
@@ -125,6 +208,10 @@
     return earthKm * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
   }
 
+  function distanceOrigin() {
+    return state.userLocation ? { ...state.userLocation, source: 'user' } : null;
+  }
+
   function walkingMinutes(distanceKm) {
     if (!Number.isFinite(distanceKm)) return null;
     return Math.max(1, Math.round((distanceKm / 4.8) * 60));
@@ -132,13 +219,17 @@
 
   function applyDistance(bathroom) {
     if (!bathroom) return bathroom;
-    if (!state.userLocation || !hasCoordinates(bathroom)) return bathroom;
-    const km = distanceKmBetween(state.userLocation, bathroom);
+    if (!hasCoordinates(bathroom)) return bathroom;
+    const origin = distanceOrigin();
+    if (!origin || !Number.isFinite(origin.lat) || !Number.isFinite(origin.lng)) return bathroom;
+    const km = distanceKmBetween(origin, bathroom);
     if (!Number.isFinite(km)) return bathroom;
     return {
       ...bathroom,
       distanceKm: km,
-      distanceMinutes: walkingMinutes(km)
+      distanceMinutes: origin.source === 'user' ? walkingMinutes(km) : null,
+      distanceSource: origin.source,
+      distanceOriginLabel: 'Near me'
     };
   }
 
@@ -194,7 +285,23 @@
       forest: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 7 8h-4l3 5h-4v5h-4v-5H6l3-5H5l7-8Z"></path></svg>',
       camera: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 4.5 16 7h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h3l1.5-2.5h5Z"></path><circle cx="12" cy="13" r="3"></circle></svg>',
       filter: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"></path></svg>',
-      lock: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>'
+      lock: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>',
+      paper: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10a3 3 0 0 1 3 3v11a2 2 0 0 1-2 2H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Z"></path><path d="M8 8h8M8 12h6M8 16h4"></path></svg>',
+      soap: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="9" rx="3"></rect><path d="M9 10V7h6v3M10 5h4"></path><path d="M8 14h8"></path></svg>',
+      mirror: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="3" width="12" height="16" rx="6"></rect><path d="M9 21h6M12 19v2M9 8c1.5-1.5 3.5-2 6-1.5"></path></svg>',
+      accessible: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="4" r="2"></circle><path d="M11 6v7h5l3 6"></path><path d="M8 11a5 5 0 1 0 6 7"></path><path d="M7 10h4"></path></svg>',
+      baby: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="3"></circle><path d="M6 21v-3a6 6 0 0 1 12 0v3"></path><path d="M9 14l-2 3M15 14l2 3"></path></svg>',
+      hook: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10a4 4 0 1 1-8 0"></path><path d="M12 3a4 4 0 0 1 4 4v1"></path></svg>',
+      sink: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 13h14v3a5 5 0 0 1-5 5h-4a5 5 0 0 1-5-5v-3Z"></path><path d="M12 13V5h4"></path><path d="M16 8h3"></path></svg>',
+      dryer: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="9" rx="2"></rect><path d="M8 17h8M9 21h6"></path><path d="M9 8h6"></path></svg>',
+      shower: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12a7 7 0 0 1 14 0H5Z"></path><path d="M12 5V3"></path><path d="M8 16v.01M12 16v.01M16 16v.01M9 20v.01M15 20v.01"></path></svg>',
+      light: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4Z"></path><path d="M12 2v2M4 10H2M22 10h-2M19 4l-1.5 1.5M5 4l1.5 1.5"></path></svg>',
+      music: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l10-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="16" cy="16" r="3"></circle></svg>',
+      air: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h11a3 3 0 1 0-3-3"></path><path d="M4 13h15a3 3 0 1 1-3 3"></path><path d="M5 18h6"></path></svg>',
+      period: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="16" rx="3"></rect><path d="M12 8v8M8 12h8"></path></svg>',
+      shield: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 6v6c0 5-3.4 8-8 9-4.6-1-8-4-8-9V6l8-3Z"></path><path d="M9 12h6"></path></svg>',
+      warning: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 22 20H2L12 3Z"></path><path d="M12 9v5M12 17h.01"></path></svg>',
+      tag: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 13 13 20a2 2 0 0 1-3 0l-6-6a2 2 0 0 1 0-3l7-7h7v7Z"></path><circle cx="15.5" cy="8.5" r="1.5"></circle></svg>'
     };
     return icons[name] || '';
   }
@@ -226,11 +333,14 @@
     if (Number.isFinite(Number(bathroom.distanceKm))) {
       const km = Number(bathroom.distanceKm);
       const distance = km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`;
+      if (bathroom.distanceSource === 'user' || state.userLocation) {
+        return `Near me · ${bathroom.distanceMinutes || walkingMinutes(km)} min walk · ${distance}`;
+      }
       return `${bathroom.distanceMinutes || walkingMinutes(km)} min walk · ${distance}`;
     }
     if (bathroom.distanceMinutes) return `${bathroom.distanceMinutes} min walk`;
     if (bathroom.distanceMiles) return `${bathroom.distanceMiles} mi away`;
-    if (hasCoordinates(bathroom)) return state.userLocation ? 'Distance loading' : 'On the map';
+    if (hasCoordinates(bathroom)) return state.userLocation ? 'Distance loading' : 'Enable location';
     return 'Location missing';
   }
 
@@ -243,7 +353,17 @@
     });
   }
 
+  function bathroomsForMap(selected) {
+    if (!state.userLocation && !state.searchQuery && !hasCoordinates(selected)) return [];
+    const mapped = sortedByDistance(filteredBathrooms()).filter(hasCoordinates).slice(0, MAP_MARKER_LIMIT);
+    if (hasCoordinates(selected) && !mapped.some((bathroom) => bathroom.id === selected.id)) {
+      return [selected, ...mapped];
+    }
+    return mapped;
+  }
+
   function nearestBathroom() {
+    if (!state.userLocation) return null;
     const visible = filteredBathrooms().filter(hasCoordinates);
     return sortedByDistance(visible)[0] || sortedByDistance(filteredBathrooms())[0] || null;
   }
@@ -310,8 +430,23 @@
     return match?.country || '';
   }
 
-  async function resolveCountryForLocation(location) {
-    const fallback = countryFromCoordinates(location);
+  function cityFromAddress(address = {}) {
+    return address.city ||
+      address.town ||
+      address.village ||
+      address.municipality ||
+      address.suburb ||
+      address.county ||
+      '';
+  }
+
+  async function resolvePlaceForLocation(location) {
+    const fallbackCountry = countryFromCoordinates(location);
+    const fallback = {
+      city: '',
+      country: fallbackCountry,
+      label: fallbackCountry || ''
+    };
     if (!location || window.UNPISSED_CONFIG?.ENABLE_REVERSE_GEOCODING === false) return fallback;
 
     const lat = Number(location.lat);
@@ -325,7 +460,7 @@
       const url = new URL(window.UNPISSED_CONFIG?.REVERSE_GEOCODE_URL || 'https://nominatim.openstreetmap.org/reverse');
       url.searchParams.set('format', 'jsonv2');
       url.searchParams.set('addressdetails', '1');
-      url.searchParams.set('zoom', '3');
+      url.searchParams.set('zoom', '18');
       url.searchParams.set('lat', String(lat));
       url.searchParams.set('lon', String(lng));
       const response = await fetch(url.toString(), {
@@ -334,7 +469,14 @@
       });
       if (!response.ok) throw new Error('Reverse geocoding failed.');
       const data = await response.json();
-      return data?.address?.country || countryNameFromCode(data?.address?.country_code) || fallback;
+      const address = data?.address || {};
+      const city = cityFromAddress(address);
+      const country = address.country || countryNameFromCode(address.country_code) || fallbackCountry;
+      return {
+        city,
+        country,
+        label: [city, country].filter(Boolean).join(', ') || data?.display_name || fallback.label
+      };
     } catch {
       return fallback;
     } finally {
@@ -426,6 +568,7 @@
     `;
     bindEvents();
     queueMapRender();
+    queueAddBathroomMapRender();
   }
 
   function renderHeader() {
@@ -453,16 +596,19 @@
   function renderBackendStrip() {
     const signedIn = Boolean(state.authUser);
     const missing = state.backendStatus === 'missing';
-    const tone = signedIn ? 'live' : (missing ? 'missing' : 'ready');
-    const label = signedIn ? 'Supabase live' : (missing ? 'Setup required' : 'Supabase ready');
+    const failed = state.backendStatus === 'error';
+    const tone = signedIn ? 'live' : ((missing || failed) ? 'missing' : 'ready');
+    const label = signedIn ? 'Supabase live' : (failed ? 'Supabase error' : (missing ? 'Setup required' : 'Supabase ready'));
+    const action = signedIn ? 'sync-supabase' : ((failed || missing) ? 'retry-startup' : 'open-auth');
+    const buttonLabel = signedIn ? 'Sync' : ((failed || missing) ? 'Retry' : 'Sign in');
     return `
       <section class="backend-strip backend-strip--${tone}">
         <div>
           <b>${escapeHtml(label)}</b>
           <span>${escapeHtml(state.syncMessage || '')}</span>
         </div>
-        <button class="backend-strip__button" data-action="${signedIn ? 'sync-supabase' : 'open-auth'}">
-          ${signedIn ? 'Sync' : 'Sign in'}
+        <button class="backend-strip__button" data-action="${action}">
+          ${buttonLabel}
         </button>
       </section>
     `;
@@ -471,6 +617,7 @@
   function renderActiveTab() {
     if (state.loading) return renderLoadingState();
     if (state.backendStatus === 'missing') return renderMissingConfigState();
+    if (state.backendStatus === 'error') return renderBackendErrorState();
     switch (state.activeTab) {
       case 'friends':
       case 'feed': return renderFriendsPage();
@@ -485,19 +632,37 @@
     return `
       <article class="simple-card">
         <h3>Loading Unpissed</h3>
-        <p>Connecting to Supabase.</p>
+        <p>${escapeHtml(state.syncMessage || 'Connecting to Supabase.')}</p>
       </article>
     `;
   }
 
   function renderMissingConfigState() {
+    const setup = getConfigurationStatus();
+    const canRetry = setup.reason === 'missing-library' || setup.reason === 'missing-api';
     return `
       <section class="content-page">
-        <h2 class="page-title">Supabase required</h2>
-        <p class="page-subtitle">This build uses Supabase only. Add your Supabase URL and anon key in <code>js/config.js</code>.</p>
+        <h2 class="page-title">${escapeHtml(setup.title || 'Supabase required')}</h2>
+        <p class="page-subtitle">${escapeHtml(state.syncMessage || setup.message)}</p>
         <article class="simple-card">
           <h3>No local fallback</h3>
           <p>All bathrooms, ratings, check-ins, badges and feed events now come from Supabase.</p>
+          ${canRetry ? '<div style="height:12px"></div><button class="primary-button full-width" data-action="retry-startup">Retry</button>' : ''}
+        </article>
+      </section>
+    `;
+  }
+
+  function renderBackendErrorState() {
+    return `
+      <section class="content-page">
+        <h2 class="page-title">Supabase could not load</h2>
+        <p class="page-subtitle">${escapeHtml(state.syncMessage || 'The connection to Supabase failed.')}</p>
+        <article class="simple-card">
+          <h3>Try again</h3>
+          <p>The app will stop loading and show this screen when Supabase does not answer in time.</p>
+          <div style="height:12px"></div>
+          <button class="primary-button full-width" data-action="retry-startup">Retry</button>
         </article>
       </section>
     `;
@@ -508,6 +673,7 @@
     const hasBathrooms = bathrooms().length > 0;
     const showMap = state.mapVisible || Boolean(state.routeBathroomId);
     const visibleCount = filteredBathrooms().length;
+    const listMeta = state.userLocation ? `${Math.min(10, visibleCount)} of ${visibleCount}` : 'Location needed';
     return `
       <button class="emergency-card" data-action="open-emergency">
         <div>
@@ -520,9 +686,10 @@
 
       ${renderSearchBar()}
       ${renderFilterBar()}
+      ${renderRegisterToiletAction()}
       <div class="section-row">
         <h2 class="section-title">${showMap ? (state.routeBathroomId ? 'Emergency route' : 'Map view') : 'Closest bathrooms'}</h2>
-        ${showMap ? '<button class="section-action" data-action="show-bathroom-list">List</button>' : `<span class="section-meta">${Math.min(10, visibleCount)} of ${visibleCount}</span>`}
+        ${showMap ? '<button class="section-action" data-action="show-bathroom-list">List</button>' : `<span class="section-meta">${escapeHtml(listMeta)}</span>`}
       </div>
       ${showMap ? renderMap() : ''}
       ${showMap ? (bathroom ? renderBathroomCard(bathroom) : (hasBathrooms ? renderChooseMapFlagCard() : renderNoBathroomsCard())) : (hasBathrooms ? renderClosestBathroomList() : renderNoBathroomsCard())}
@@ -547,6 +714,16 @@
         <div><b>Emergency route active</b><small>${escapeHtml(bathroom.name)} · ${escapeHtml(distanceLabel(bathroom))}</small></div>
         <em>Open</em>
       </button>
+    `;
+  }
+
+  function renderRegisterToiletAction() {
+    return `
+      <div class="page-action-row">
+        <button class="secondary-button full-width register-toilet-button" data-action="open-add-bathroom">
+          ${icon('plus')} Register toilet
+        </button>
+      </div>
     `;
   }
 
@@ -580,6 +757,7 @@
   }
 
   function renderNearbyList() {
+    if (!state.userLocation) return '';
     const visible = sortedByDistance(filteredBathrooms());
     if (!visible.length) return '';
     return `
@@ -594,7 +772,18 @@
     `;
   }
 
+  function renderLocationRequiredCard() {
+    return `
+      <article class="simple-card simple-card--compact">
+        <h3>Enable location for nearby</h3>
+        <p>Nearby is calculated from your device location only.</p>
+        <button class="secondary-button full-width" data-action="request-location">Enable location</button>
+      </article>
+    `;
+  }
+
   function renderClosestBathroomList() {
+    if (!state.userLocation) return renderLocationRequiredCard();
     const visible = sortedByDistance(filteredBathrooms()).slice(0, 10);
     if (!visible.length) return '<div class="empty-state">No bathrooms match these filters.</div>';
     return `
@@ -607,6 +796,26 @@
               <small>${rounded(bathroom.rating)} star &middot; ${escapeHtml(distanceLabel(bathroom))}</small>
             </span>
             <span class="closest-meta">${escapeHtml(bathroom.status || 'OPEN')}</span>
+          </button>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function renderCheckinBathroomList() {
+    if (!state.userLocation) return renderLocationRequiredCard();
+    const visible = sortedByDistance(filteredBathrooms()).slice(0, 10);
+    if (!visible.length) return '<div class="empty-state">No bathrooms match these filters.</div>';
+    return `
+      <div class="closest-list" aria-label="Bathrooms to check in at">
+        ${visible.map((bathroom, index) => `
+          <button class="closest-row ${bathroom.id === state.selectedBathroomId ? 'is-active' : ''}" data-action="select-checkin-bathroom" data-bathroom-id="${escapeHtml(bathroom.id)}">
+            <span class="closest-rank">${index + 1}</span>
+            <span class="closest-copy">
+              <b>${escapeHtml(bathroom.name)}</b>
+              <small>${rounded(bathroom.rating)} star &middot; ${escapeHtml(distanceLabel(bathroom))}</small>
+            </span>
+            <span class="closest-meta">${bathroom.id === state.selectedBathroomId ? 'Selected' : escapeHtml(bathroom.status || 'OPEN')}</span>
           </button>
         `).join('')}
       </div>
@@ -654,6 +863,11 @@
     `;
   }
 
+  function renderCheckinLocationPrompt() {
+    if (state.geoStatus === 'ready' && state.userLocation) return '';
+    return renderLocationStrip();
+  }
+
   function renderMap() {
     return `
       <div class="map-card map-card--leaflet">
@@ -669,6 +883,7 @@
         <div class="selected-body empty-state">
           <h2>No bathrooms yet</h2>
           <p>Your Supabase database is connected, but there are no bathrooms available yet. Check-ins will appear here when there is something to rate.</p>
+          <button class="primary-button full-width" data-action="open-add-bathroom">${icon('plus')} Register toilet</button>
         </div>
       </article>
     `;
@@ -877,13 +1092,26 @@
   function renderCheckinPage() {
     const bathroom = selectedMapBathroom();
     const hasBathrooms = bathrooms().length > 0;
+    const nearbyMeta = state.userLocation ? `${Math.min(10, filteredBathrooms().length)} of ${filteredBathrooms().length}` : 'Location needed';
     return `
       <section class="content-page">
         <h2 class="page-title">Check In</h2>
         <p class="page-subtitle">You survived. How was it?</p>
+        ${renderRegisterToiletAction()}
+        ${renderSearchBar()}
+        ${renderFilterBar()}
+        ${renderCheckinLocationPrompt()}
+        ${hasBathrooms ? renderMap() : ''}
         ${bathroom ? renderBathroomCard(bathroom) : (hasBathrooms ? renderChooseMapFlagCard() : renderNoBathroomsCard())}
         <div style="height:14px"></div>
         ${bathroom ? `<button class="primary-button full-width" data-action="open-checkin" data-bathroom-id="${bathroom.id}">Rate the relief</button>` : ''}
+        ${hasBathrooms ? `
+          <div class="section-row">
+            <h2 class="section-title">Nearby choices</h2>
+            <span class="section-meta">${escapeHtml(nearbyMeta)}</span>
+          </div>
+          ${renderCheckinBathroomList()}
+        ` : ''}
       </section>
     `;
   }
@@ -997,10 +1225,10 @@
     return '';
   }
 
-  function renderModalShell(title, subtitle, body) {
+  function renderModalShell(title, subtitle, body, modalClass = '') {
     return `
       <div class="modal-backdrop" data-action="close-modal">
-        <section class="modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}" data-modal-panel>
+        <section class="modal ${escapeHtml(modalClass)}" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}" data-modal-panel>
           <div class="modal-header">
             <div>
               <h2 class="modal-title">${escapeHtml(title)}</h2>
@@ -1015,9 +1243,11 @@
   }
 
   function renderEmergencyModal() {
+    if (!state.userLocation) {
+      return renderModalShell('Emergency Mode', 'Find the closest usable option.', renderLocationRequiredCard());
+    }
     const sorted = sortedByDistance(bathrooms());
     const body = sorted.length ? `
-      ${state.userLocation ? '' : '<article class="simple-card simple-card--compact"><h3>Location needed for real distance</h3><p>Tap Enable location to sort these by walking distance.</p><button class="secondary-button full-width" data-action="request-location">Enable location</button></article>'}
       <div class="list-stack">
         ${sorted.map((bathroom, index) => `
           <article class="simple-card">
@@ -1116,12 +1346,79 @@
     `;
   }
 
+  function renderFacilityPresetChips() {
+    return `
+      <fieldset class="facility-preset-field">
+        <legend>Bathroom perks</legend>
+        <div class="facility-chip-grid">
+          ${FACILITY_PRESETS.map((preset) => `
+            <label class="facility-chip">
+              <input type="checkbox" name="facilityPreset" value="${escapeHtml(preset.value)}" />
+              <span>
+                ${icon(preset.icon)}
+                <b>${escapeHtml(preset.label)}</b>
+                <small>${escapeHtml(preset.note || preset.value)}</small>
+              </span>
+            </label>
+          `).join('')}
+        </div>
+      </fieldset>
+    `;
+  }
+
+  function renderProblemPresetChips() {
+    return `
+      <fieldset class="facility-preset-field issue-preset-field">
+        <legend>Red flags</legend>
+        <div class="facility-chip-grid">
+          ${PROBLEM_PRESETS.map((preset) => `
+            <label class="facility-chip issue-chip">
+              <input type="checkbox" name="issuePreset" value="${escapeHtml(preset.value)}" />
+              <span>
+                ${icon(preset.icon)}
+                <b>${escapeHtml(preset.label)}</b>
+                <small>${escapeHtml(preset.note || preset.value)}</small>
+              </span>
+            </label>
+          `).join('')}
+        </div>
+      </fieldset>
+    `;
+  }
+
   function renderAddBathroomModal() {
+    const location = state.addBathroomLocation || state.userLocation;
+    const hasLocation = hasCoordinates(location);
+    const place = state.addBathroomPlace;
+    const placeLabel = state.addBathroomGeocoding
+      ? 'Detecting city from map...'
+      : (place?.label || (hasLocation ? 'City will be detected from map data.' : 'Location is required before registration.'));
     const body = `
       <form class="add-form" data-form="add-bathroom">
+        <div class="registration-location-panel">
+          ${hasLocation ? `
+            <article class="registration-map-card">
+              <div id="add-bathroom-map" class="registration-map" aria-label="Map position for the toilet"></div>
+              <div class="registration-map__hint">Pinned toilet location</div>
+            </article>
+          ` : `
+            <article class="simple-card simple-card--compact">
+              <h3>Location required</h3>
+              <p>Enable location so the toilet can be placed on the map.</p>
+              <button type="button" class="secondary-button full-width" data-action="request-location">Use my location</button>
+            </article>
+          `}
+          <article class="location-capture">
+            <div>
+              <b>Map position</b>
+              <small>${hasLocation ? `${Number(location.lat).toFixed(5)}, ${Number(location.lng).toFixed(5)} · ${escapeHtml(placeLabel)}` : escapeHtml(placeLabel)}</small>
+            </div>
+            <button type="button" class="secondary-button" data-action="request-location">${hasLocation ? 'Recenter' : 'Use my location'}</button>
+          </article>
+        </div>
         <label class="form-field">
           <span>Name</span>
-          <input name="name" required maxlength="80" placeholder="Venue or bathroom name" />
+          <input name="name" required maxlength="80" placeholder="Venue or toilet name" />
         </label>
         <div class="field-grid">
           <label class="form-field"><span>Type</span><select name="type"><option>Bar</option><option>Restaurant</option><option>Café</option><option>Club</option><option>Venue</option><option>Public</option><option>Outdoor</option><option>Forest</option><option>Other</option></select></label>
@@ -1131,26 +1428,17 @@
           <span>Access note</span>
           <input name="access" maxlength="120" placeholder="Public-ish · No code · Trail / forest stop" />
         </label>
+        ${renderFacilityPresetChips()}
+        ${renderProblemPresetChips()}
         <label class="form-field">
-          <span>Facilities</span>
-          <input name="facilities" maxlength="180" placeholder="Accessible, Soap, Mirror, Hooks, Forest" />
-          <small>Comma-separated.</small>
+          <span>Extra details</span>
+          <input name="facilities" maxlength="180" placeholder="Code on receipt, changing room, quiet corner" />
+          <small>Optional comma-separated extras.</small>
         </label>
-        <label class="form-field">
-          <span>City</span>
-          <input name="city" maxlength="80" placeholder="City" />
-        </label>
-        <article class="location-capture">
-          <div>
-            <b>Map position</b>
-            <small>${state.userLocation ? `Will save current location: ${Number(state.userLocation.lat).toFixed(5)}, ${Number(state.userLocation.lng).toFixed(5)}. Country is detected automatically.` : 'Enable location before adding to place the bathroom on the map and detect country.'}</small>
-          </div>
-          <button type="button" class="secondary-button" data-action="request-location">${state.userLocation ? 'Refresh' : 'Use my location'}</button>
-        </article>
-        <button class="primary-button full-width" type="submit">Add this throne</button>
+        <button class="primary-button full-width" type="submit" ${hasLocation ? '' : 'disabled'}>Register toilet</button>
       </form>
     `;
-    return renderModalShell('Add Bathroom', 'Map a new throne for the people.', body);
+    return renderModalShell('Register Toilet', 'Add a new candidate to Supabase.', body, 'modal--register');
   }
 
   function renderAuthModal() {
@@ -1256,6 +1544,14 @@
           mapHasMoved: true
         });
         break;
+      case 'select-checkin-bathroom':
+        setState({
+          activeTab: 'checkin',
+          modal: null,
+          selectedBathroomId: element.dataset.bathroomId,
+          mapHasMoved: true
+        });
+        break;
       case 'show-bathroom-list':
         setState({
           mapVisible: false,
@@ -1270,7 +1566,17 @@
           setState({ modal: 'auth' });
           return;
         }
-        setState({ modal: 'addBathroom' });
+        {
+          const initialLocation = state.userLocation || state.addBathroomLocation;
+          setState({
+            modal: 'addBathroom',
+            addBathroomLocation: initialLocation,
+            addBathroomPlace: null,
+            addBathroomGeocoding: false
+          });
+          const location = initialLocation || await requestUserLocation();
+          if (location) await setAddBathroomLocation(location);
+        }
         break;
       case 'open-notifications':
         setState({ modal: 'notifications' });
@@ -1288,6 +1594,11 @@
         break;
       case 'sync-supabase':
         await syncSupabase();
+        break;
+      case 'retry-startup':
+        state = { ...state, loading: true, syncMessage: 'Connecting to Supabase.' };
+        render();
+        await initApp();
         break;
       case 'sign-out':
         await signOut();
@@ -1322,7 +1633,11 @@
           return;
         }
         if (!state.userLocation) await requestUserLocation({ silent: true });
-        toast('Emergency route ready', state.userLocation ? 'Follow the blue line. Dignity may be restored.' : 'Location is needed for the blue line.');
+        if (!state.userLocation) {
+          toast('Location needed', 'Enable location to start an emergency route.');
+          return;
+        }
+        toast('Emergency route ready', 'Follow the blue line. Dignity may be restored.');
         setState({
           activeTab: 'map',
           modal: null,
@@ -1334,10 +1649,16 @@
         break;
       }
       case 'request-location':
-        await requestUserLocation();
+        {
+          const location = await requestUserLocation();
+          if (state.modal === 'addBathroom' && location) await setAddBathroomLocation(location);
+        }
         break;
       case 'recenter':
-        await requestUserLocation({ recenter: true });
+        {
+          const location = await requestUserLocation({ recenter: true });
+          if (state.modal === 'addBathroom' && location) await setAddBathroomLocation(location);
+        }
         break;
       default:
         break;
@@ -1348,6 +1669,11 @@
   function queueMapRender() {
     if (mapRenderTimer) window.clearTimeout(mapRenderTimer);
     mapRenderTimer = window.setTimeout(updateLeafletMap, 0);
+  }
+
+  function queueAddBathroomMapRender() {
+    if (addBathroomMapRenderTimer) window.clearTimeout(addBathroomMapRenderTimer);
+    addBathroomMapRenderTimer = window.setTimeout(updateAddBathroomMap, 0);
   }
 
   function mapDefaults() {
@@ -1363,9 +1689,10 @@
 
   function updateLeafletMap() {
     const container = document.querySelector('#unpissed-map');
-    if (!container || state.activeTab !== 'map' || state.loading || state.backendStatus === 'missing') return;
+    if (!container || !['map', 'checkin'].includes(state.activeTab) || state.loading || state.backendStatus === 'missing') return;
     if (!window.L) {
       container.innerHTML = '<div class="map-empty">Map library did not load.</div>';
+      window.UnpissedLeafletVendorReady?.then?.(() => queueMapRender()).catch(() => {});
       return;
     }
 
@@ -1379,7 +1706,9 @@
     }
 
     const selected = selectedMapBathroom();
-    const firstMapped = sortedByDistance(filteredBathrooms()).find(hasCoordinates);
+    const firstMapped = state.userLocation || state.searchQuery
+      ? sortedByDistance(filteredBathrooms()).find(hasCoordinates)
+      : null;
     const selectedHasCoordinates = hasCoordinates(selected);
     const startCenter = selectedHasCoordinates
       ? [Number(selected.lat), Number(selected.lng)]
@@ -1405,7 +1734,7 @@
 
     markerLayer.clearLayers();
     const markers = [];
-    filteredBathrooms().filter(hasCoordinates).forEach((bathroom) => {
+    bathroomsForMap(selected).forEach((bathroom) => {
       const isActive = bathroom.id === state.selectedBathroomId;
       const marker = window.L.marker([Number(bathroom.lat), Number(bathroom.lng)], {
         title: bathroom.name,
@@ -1471,13 +1800,119 @@
         Math.max(leafletMap.getZoom(), startZoom),
         { animate: true }
       );
-    } else if (boundsItems.length >= 2 && !state.mapHasMoved) {
+    } else if (boundsItems.length >= 2 && !state.mapHasMoved && (state.userLocation || state.searchQuery)) {
       leafletMap.fitBounds(boundsItems, { padding: [36, 36], maxZoom: 16 });
     } else if (state.userLocation && !state.mapHasMoved) {
       leafletMap.setView([state.userLocation.lat, state.userLocation.lng], 15);
     }
 
     window.setTimeout(() => leafletMap?.invalidateSize?.(), 80);
+  }
+
+  function removeAddBathroomMap() {
+    if (addBathroomMap) {
+      addBathroomMap.remove();
+      addBathroomMap = null;
+      addBathroomMarker = null;
+    }
+  }
+
+  function updateAddBathroomMap() {
+    const container = document.querySelector('#add-bathroom-map');
+    if (!container || state.modal !== 'addBathroom') {
+      removeAddBathroomMap();
+      return;
+    }
+    if (!window.L) {
+      container.innerHTML = '<div class="map-empty">Map library did not load.</div>';
+      window.UnpissedLeafletVendorReady?.then?.(() => queueAddBathroomMapRender()).catch(() => {});
+      return;
+    }
+
+    const location = state.addBathroomLocation || state.userLocation;
+    if (!hasCoordinates(location)) return;
+    const defaults = mapDefaults();
+    const center = [Number(location.lat), Number(location.lng)];
+
+    if (addBathroomMap && addBathroomMap.getContainer && addBathroomMap.getContainer() !== container) {
+      removeAddBathroomMap();
+    }
+
+    if (!addBathroomMap) {
+      addBathroomMap = window.L.map(container, {
+        zoomControl: false,
+        attributionControl: true
+      }).setView(center, 18);
+      window.L.control.zoom({ position: 'bottomright' }).addTo(addBathroomMap);
+      window.L.tileLayer(defaults.tileUrl, {
+        maxZoom: 19,
+        attribution: defaults.attribution
+      }).addTo(addBathroomMap);
+      addBathroomMap.on('click', (event) => {
+        setAddBathroomLocation({
+          lat: event.latlng.lat,
+          lng: event.latlng.lng,
+          updatedAt: new Date().toISOString()
+        });
+      });
+    } else {
+      addBathroomMap.setView(center, Math.max(addBathroomMap.getZoom(), 17), { animate: false });
+    }
+
+    if (!addBathroomMarker) {
+      addBathroomMarker = window.L.marker(center, {
+        title: 'Toilet location',
+        draggable: true,
+        icon: window.L.divIcon({
+          className: 'registration-location-pin',
+          html: icon('plus'),
+          iconSize: [34, 34],
+          iconAnchor: [17, 17]
+        })
+      }).addTo(addBathroomMap);
+      addBathroomMarker.on('dragend', () => {
+        const next = addBathroomMarker.getLatLng();
+        setAddBathroomLocation({
+          lat: next.lat,
+          lng: next.lng,
+          updatedAt: new Date().toISOString()
+        });
+      });
+    } else {
+      addBathroomMarker.setLatLng(center);
+    }
+
+    window.setTimeout(() => addBathroomMap?.invalidateSize?.(), 80);
+  }
+
+  async function setAddBathroomLocation(location) {
+    if (!hasCoordinates(location)) return null;
+    const nextLocation = {
+      lat: Number(location.lat),
+      lng: Number(location.lng),
+      accuracy: Number(location.accuracy ?? 0) || null,
+      updatedAt: location.updatedAt || new Date().toISOString()
+    };
+    state = {
+      ...state,
+      addBathroomLocation: nextLocation,
+      addBathroomPlace: null,
+      addBathroomGeocoding: true
+    };
+    render();
+
+    const place = await resolvePlaceForLocation(nextLocation);
+    const current = state.addBathroomLocation;
+    if (!current || Number(current.lat) !== nextLocation.lat || Number(current.lng) !== nextLocation.lng) {
+      return nextLocation;
+    }
+    state = {
+      ...state,
+      addBathroomPlace: place,
+      addBathroomGeocoding: false
+    };
+    render();
+    return nextLocation;
   }
 
   async function requestUserLocation(options = {}) {
@@ -1526,14 +1961,15 @@
   }
 
   async function initApp() {
-    if (!API?.isConfigured?.()) {
-      setState({ loading: false, backendStatus: 'missing', syncMessage: 'Add Supabase credentials in js/config.js.' });
+    if (!await waitForSupabaseLibrary()) {
+      const setup = getConfigurationStatus();
+      setState({ loading: false, backendStatus: 'missing', syncMessage: setup.message });
       return;
     }
     try {
-      const { user } = await API.getSession();
+      const { user } = await withTimeout(API.getSession(), STARTUP_TIMEOUT_MS, 'Supabase session');
       let profile = null;
-      if (user) profile = await API.ensureProfile(user);
+      if (user) profile = await withTimeout(API.ensureProfile(user), STARTUP_TIMEOUT_MS, 'Supabase profile');
       state = {
         ...state,
         authUser: user,
@@ -1544,17 +1980,18 @@
       render();
       await syncSupabase({ silent: true });
     } catch (error) {
-      setState({ loading: false, backendStatus: 'error', syncMessage: `Supabase error: ${error.message}` });
+      setState({ loading: false, backendStatus: 'error', syncMessage: `Supabase error: ${errorMessage(error)}` });
     }
   }
 
   async function syncSupabase(options = {}) {
     if (!API?.isConfigured?.()) {
-      setState({ backendStatus: 'missing', syncMessage: 'Supabase configuration is missing.' });
+      const setup = getConfigurationStatus();
+      setState({ loading: false, backendStatus: 'missing', syncMessage: setup.message });
       return;
     }
     try {
-      const [remoteBathrooms, badges, feed, checkins, userBadges, profiles, follows] = await Promise.all([
+      const [remoteBathrooms, badges, feed, checkins, userBadges, profiles, follows] = await withTimeout(Promise.all([
         API.listBathrooms(),
         API.listBadges(),
         API.listFeedEvents(),
@@ -1562,7 +1999,7 @@
         state.authUser ? API.listUserBadges(state.authUser.id) : Promise.resolve([]),
         state.authUser ? API.listProfiles(state.authUser.id) : Promise.resolve([]),
         state.authUser ? API.listFollows(state.authUser.id) : Promise.resolve([])
-      ]);
+      ]), STARTUP_TIMEOUT_MS, 'Supabase sync');
       const selectedStillExists = remoteBathrooms.some((item) => item.id === state.selectedBathroomId);
       const routeStillExists = remoteBathrooms.some((item) => item.id === state.routeBathroomId);
       state = {
@@ -1592,9 +2029,9 @@
       }
       if (!options.silent) toast('Supabase synced', state.syncMessage);
     } catch (error) {
-      state = { ...state, loading: false, backendStatus: 'error', syncMessage: `Sync failed: ${error.message}` };
+      state = { ...state, loading: false, backendStatus: 'error', syncMessage: `Sync failed: ${errorMessage(error)}` };
       render();
-      toast('Sync failed', error.message);
+      if (!options.silent) toast('Sync failed', errorMessage(error));
     }
   }
 
@@ -1821,26 +2258,38 @@
   async function handleAddBathroomSubmit(event) {
     event.preventDefault();
     if (!state.authUser) return;
+    const location = state.addBathroomLocation || state.userLocation;
+    if (!hasCoordinates(location)) {
+      toast('Location needed', 'Enable location so the toilet can be placed on the map.');
+      const nextLocation = await requestUserLocation();
+      if (nextLocation) await setAddBathroomLocation(nextLocation);
+      return;
+    }
     const formData = new FormData(event.currentTarget);
     const name = String(formData.get('name') || '').trim();
     if (!name) return;
     const access = String(formData.get('access') || '').trim();
     const type = String(formData.get('type') || 'Other').trim() || 'Other';
-    const rawFacilities = String(formData.get('facilities') || '').split(',').map((item) => item.trim()).filter(Boolean);
+    const presetFacilities = formData.getAll('facilityPreset').map((item) => String(item || '').trim()).filter(Boolean);
+    const problemFacilities = formData.getAll('issuePreset').map((item) => String(item || '').trim()).filter(Boolean);
+    const extraFacilities = String(formData.get('facilities') || '').split(',').map((item) => item.trim()).filter(Boolean);
+    const rawFacilities = [...presetFacilities, ...problemFacilities, ...extraFacilities];
     const outdoor = isOutdoorBathroom({ type, access, facilities: rawFacilities });
     const facilities = uniqueList([...rawFacilities, ...(outdoor ? ['Outdoor', 'Forest'] : [])]);
-    const country = await resolveCountryForLocation(state.userLocation);
+    const redFlagTags = problemFacilities.length ? ['red-flag', ...problemFacilities.map((item) => item.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''))] : [];
+    const place = state.addBathroomPlace || await resolvePlaceForLocation(location);
+    const country = place?.country || countryFromCoordinates(location);
     const input = {
       name,
       type,
       access: access || 'Access unknown',
       accessMode: String(formData.get('accessMode') || 'unknown'),
       facilities,
-      city: String(formData.get('city') || '').trim(),
+      city: place?.city || '',
       country,
-      lat: state.userLocation?.lat ?? null,
-      lng: state.userLocation?.lng ?? null,
-      vibeTags: uniqueList([...facilities.slice(0, 3), ...(outdoor ? ['outdoor', 'forest', 'nature'] : [])])
+      lat: Number(location.lat),
+      lng: Number(location.lng),
+      vibeTags: uniqueList([...facilities.slice(0, 3), ...redFlagTags, ...(outdoor ? ['outdoor', 'forest', 'nature'] : [])])
     };
 
     try {
@@ -1850,6 +2299,9 @@
         ...state,
         selectedBathroomId: created.id,
         modal: null,
+        addBathroomLocation: null,
+        addBathroomPlace: null,
+        addBathroomGeocoding: false,
         activeTab: 'map',
         syncMessage: 'Bathroom submitted to Supabase moderation.'
       };
@@ -1924,8 +2376,31 @@
     setTimeout(() => item.remove(), 3400);
   }
 
+  function isLocalDevelopmentHost() {
+    return ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+  }
+
+  async function clearLocalPwaCache() {
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+      if (window.caches?.keys) {
+        const keys = await caches.keys();
+        await Promise.all(keys
+          .filter((key) => key.toLowerCase().startsWith('unpissed'))
+          .map((key) => caches.delete(key)));
+      }
+    } catch {
+      // Local cache cleanup should never block the app.
+    }
+  }
+
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
+      if (isLocalDevelopmentHost()) {
+        clearLocalPwaCache();
+        return;
+      }
       navigator.serviceWorker.register('./sw.js').catch(() => {});
     });
   }

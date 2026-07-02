@@ -5,7 +5,7 @@
   "description": "Supabase-backed mobile-first PWA for Unpissed with Leaflet map, geolocation and fixed mobile navigation.",
   "scripts": {
     "dev": "npx serve .",
-    "check": "node --check js/app.js && node --check js/config.js && node --check js/config.example.js && node --check js/supabase-api.js && node --check netlify/functions/health.js"
+    "check": "node --check js/app.js && node --check js/config.js && node --check js/config.example.js && node --check js/vendor-fallback.js && node --check js/supabase-api.js && node --check netlify/functions/health.js"
   },
   "keywords": [
     "pwa",
