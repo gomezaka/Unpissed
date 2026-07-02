@@ -120,11 +120,15 @@
     addBathroomLocation: null,
     addBathroomPlace: null,
     addBathroomGeocoding: false,
+    installPromptAvailable: false,
+    installStatus: isInstalledApp() ? 'installed' : 'idle',
+    installMessage: '',
     mapHasMoved: false,
     mapVisible: false
   };
 
   let state = { ...defaultState };
+  let deferredInstallPrompt = null;
   let leafletMap = null;
   let markerLayer = null;
   let userMarker = null;
@@ -137,6 +141,12 @@
   function setState(patch) {
     state = { ...state, ...patch };
     render();
+  }
+
+  function isInstalledApp() {
+    return window.matchMedia?.('(display-mode: standalone)')?.matches ||
+      window.navigator.standalone === true ||
+      document.referrer.startsWith('android-app://');
   }
 
   function getConfigurationStatus() {
@@ -285,6 +295,8 @@
       forest: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 7 8h-4l3 5h-4v5h-4v-5H6l3-5H5l7-8Z"></path></svg>',
       camera: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 4.5 16 7h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h3l1.5-2.5h5Z"></path><circle cx="12" cy="13" r="3"></circle></svg>',
       filter: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"></path></svg>',
+      download: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>',
+      share: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4"></path><path d="m7 9 5-5 5 5"></path><path d="M5 12v7h14v-7"></path></svg>',
       lock: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>',
       paper: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10a3 3 0 0 1 3 3v11a2 2 0 0 1-2 2H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Z"></path><path d="M8 8h8M8 12h6M8 16h4"></path></svg>',
       soap: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="9" rx="3"></rect><path d="M9 10V7h6v3M10 5h4"></path><path d="M8 14h8"></path></svg>',
@@ -1141,6 +1153,32 @@
     `;
   }
 
+  function renderInstallCard() {
+    const installed = state.installStatus === 'installed' || isInstalledApp();
+    const canPrompt = Boolean(state.installPromptAvailable);
+    const message = state.installMessage || (installed
+      ? 'Unpissed is already running like an app.'
+      : (canPrompt ? 'Install Unpissed as a home-screen app.' : 'If no install prompt appears, use your browser menu.'));
+    return `
+      <article class="simple-card install-card ${installed ? 'install-card--installed' : ''}">
+        <div class="card-kicker">Shortcut</div>
+        <h3>${installed ? 'App installed' : 'Install Unpissed'}</h3>
+        <p>${escapeHtml(message)}</p>
+        ${installed ? '' : `
+          <div style="height:12px"></div>
+          <button class="${canPrompt ? 'primary-button' : 'secondary-button'} full-width" data-action="install-app">
+            ${icon(canPrompt ? 'download' : 'share')} ${canPrompt ? 'Install app' : 'Show install steps'}
+          </button>
+          <div class="install-steps">
+            <span><b>iPhone/iPad</b> Share -> Add to Home Screen</span>
+            <span><b>Android</b> Menu -> Install app / Add to Home screen</span>
+            <span><b>Desktop</b> Browser install icon or menu -> Install Unpissed</span>
+          </div>
+        `}
+      </article>
+    `;
+  }
+
   function renderProfilePage() {
     const uniqueCount = new Set(state.checkins.map((c) => c.bathroomId)).size;
     const badgeCount = new Set(state.userBadges.map((item) => item.badge_id || item.id)).size;
@@ -1153,6 +1191,8 @@
           ${renderBackendStrip()}
           ${renderLocationStrip()}
         </div>
+        ${renderInstallCard()}
+        <div style="height:12px"></div>
         <div class="stats-grid">
           <div class="stat-card"><b>${state.checkins.length}</b><span>Check-ins</span></div>
           <div class="stat-card"><b>${uniqueCount}</b><span>Unique thrones</span></div>
@@ -1594,6 +1634,9 @@
         break;
       case 'sync-supabase':
         await syncSupabase();
+        break;
+      case 'install-app':
+        await installApp();
         break;
       case 'retry-startup':
         state = { ...state, loading: true, syncMessage: 'Connecting to Supabase.' };
@@ -2058,6 +2101,46 @@
     }
   }
 
+  async function installApp() {
+    if (isInstalledApp()) {
+      setState({
+        installStatus: 'installed',
+        installPromptAvailable: false,
+        installMessage: 'Unpissed is already installed on this device.'
+      });
+      toast('Already installed', 'Unpissed is running from your home screen.');
+      return;
+    }
+
+    if (!deferredInstallPrompt?.prompt) {
+      setState({
+        installStatus: 'manual',
+        installMessage: 'Use the browser share/menu button to add Unpissed to your home screen.'
+      });
+      toast('Create shortcut', 'iPhone: Share -> Add to Home Screen. Android: Menu -> Install app.');
+      return;
+    }
+
+    deferredInstallPrompt.prompt();
+    const choice = await deferredInstallPrompt.userChoice.catch(() => null);
+    deferredInstallPrompt = null;
+    if (choice?.outcome === 'accepted') {
+      setState({
+        installStatus: 'installed',
+        installPromptAvailable: false,
+        installMessage: 'Unpissed was installed.'
+      });
+      toast('App installed', 'Unpissed is ready from your home screen.');
+    } else {
+      setState({
+        installStatus: 'manual',
+        installPromptAvailable: false,
+        installMessage: 'Install prompt was dismissed. You can still add it from the browser menu.'
+      });
+      toast('Install dismissed', 'You can still add Unpissed from the browser menu.');
+    }
+  }
+
   async function refreshFriends(options = {}) {
     if (!state.authUser) {
       setState({ profiles: [], follows: [], friendQuery: '' });
@@ -2395,11 +2478,45 @@
     }
   }
 
+  window.addEventListener('beforeinstallprompt', (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    state = {
+      ...state,
+      installPromptAvailable: true,
+      installStatus: 'ready',
+      installMessage: 'Unpissed can be installed on this device.'
+    };
+    render();
+  });
+
+  window.addEventListener('appinstalled', () => {
+    deferredInstallPrompt = null;
+    state = {
+      ...state,
+      installPromptAvailable: false,
+      installStatus: 'installed',
+      installMessage: 'Unpissed is installed.'
+    };
+    render();
+    toast('App installed', 'Shortcut created. Dignity is now one tap away.');
+  });
+
+  window.matchMedia?.('(display-mode: standalone)')?.addEventListener?.('change', () => {
+    if (!isInstalledApp()) return;
+    state = {
+      ...state,
+      installPromptAvailable: false,
+      installStatus: 'installed',
+      installMessage: 'Unpissed is running as an app.'
+    };
+    render();
+  });
+
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
+    window.addEventListener('load', async () => {
       if (isLocalDevelopmentHost()) {
-        clearLocalPwaCache();
-        return;
+        await clearLocalPwaCache();
       }
       navigator.serviceWorker.register('./sw.js').catch(() => {});
     });

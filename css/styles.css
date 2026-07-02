@@ -1975,6 +1975,47 @@ textarea:focus-visible {
   margin: 0;
 }
 
+.install-card {
+  margin: 0 0 12px;
+  background:
+    radial-gradient(circle at 92% 8%, rgba(106, 162, 255, 0.2), transparent 36%),
+    var(--surface);
+}
+
+.install-card h3 {
+  margin-top: 5px;
+}
+
+.install-card .primary-button svg,
+.install-card .secondary-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.install-card--installed {
+  border-color: rgba(85, 214, 164, 0.34);
+  background:
+    radial-gradient(circle at 92% 8%, rgba(85, 214, 164, 0.18), transparent 36%),
+    var(--surface);
+}
+
+.install-steps {
+  margin-top: 12px;
+  display: grid;
+  gap: 7px;
+}
+
+.install-steps span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.install-steps b {
+  color: var(--text);
+}
+
 .backend-strip {
   display: flex;
   align-items: center;
