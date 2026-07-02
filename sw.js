@@ -1,8 +1,13 @@
-const CACHE_NAME = 'unpissed-v0.6.1.5.0';
+const CACHE_NAME = 'unpissed-v0.6.1.7.0';
 const ASSETS = [
   './',
   './index.html',
   './css/styles.css',
+  './vendor/leaflet/leaflet.css',
+  './vendor/leaflet/leaflet.js',
+  './vendor/leaflet/images/marker-icon.png',
+  './vendor/leaflet/images/marker-icon-2x.png',
+  './vendor/leaflet/images/marker-shadow.png',
   './js/config.js',
   './js/vendor-fallback.js',
   './js/supabase-api.js',

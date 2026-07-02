@@ -2178,6 +2178,138 @@ textarea:focus-visible {
   z-index: 500;
 }
 
+.lite-map {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #111725;
+  z-index: 1;
+}
+
+.lite-map__tile {
+  position: absolute;
+  width: 256px;
+  height: 256px;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.lite-map-pin {
+  position: absolute;
+  min-width: 54px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 999px;
+  transform: translate(-50%, -100%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: var(--surface-strong);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text);
+  font-family: "Space Mono", ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 800;
+  box-shadow: 0 12px 20px -10px rgba(0, 0, 0, 0.85);
+  z-index: 8;
+}
+
+.lite-map-pin::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  width: 2px;
+  height: 10px;
+  background: currentColor;
+  transform: translateX(-50%);
+  opacity: 0.65;
+}
+
+.lite-map-pin span {
+  color: var(--gold);
+}
+
+.lite-map-pin.is-active {
+  background: var(--brand);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.lite-user-marker {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(106, 162, 255, 0.24);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 0 0 8px rgba(106, 162, 255, 0.14), 0 0 22px rgba(106, 162, 255, 0.85);
+  z-index: 9;
+}
+
+.lite-user-marker span {
+  display: block;
+  width: 12px;
+  height: 12px;
+  margin: 4px;
+  border-radius: 50%;
+  background: var(--brand-bright);
+  border: 2px solid #fff;
+}
+
+.lite-map-route {
+  position: absolute;
+  height: 4px;
+  border-radius: 999px;
+  background: repeating-linear-gradient(90deg, rgba(106, 162, 255, 0.92) 0 8px, transparent 8px 15px);
+  transform-origin: 0 50%;
+  z-index: 6;
+}
+
+.lite-registration-pin {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 9;
+}
+
+.lite-map__notice,
+.lite-map__attribution {
+  position: absolute;
+  z-index: 10;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(9, 11, 17, 0.74);
+  color: rgba(246, 248, 255, 0.78);
+  backdrop-filter: blur(10px);
+  font-family: "Space Mono", ui-monospace, monospace;
+}
+
+.lite-map__notice {
+  left: 10px;
+  top: 10px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.lite-map__attribution {
+  right: 0;
+  bottom: 0;
+  max-width: calc(100% - 20px);
+  padding: 3px 6px;
+  border-right: 0;
+  border-bottom: 0;
+  border-radius: 10px 0 0 0;
+  font-size: 10px;
+}
+
+.lite-map__attribution a {
+  color: var(--brand-bright);
+}
+
 .registration-location-panel {
   position: sticky;
   top: 0;

@@ -1730,11 +1730,188 @@
     };
   }
 
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  function tileUrl(template, z, x, y) {
+    return String(template || '')
+      .replaceAll('{z}', String(z))
+      .replaceAll('{x}', String(x))
+      .replaceAll('{y}', String(y))
+      .replaceAll('{s}', 'a');
+  }
+
+  function latLngToWorld(lat, lng, zoom) {
+    const size = 256 * (2 ** zoom);
+    const safeLat = clamp(Number(lat), -85.05112878, 85.05112878);
+    const safeLng = Number(lng);
+    const sin = Math.sin((safeLat * Math.PI) / 180);
+    return {
+      x: ((safeLng + 180) / 360) * size,
+      y: (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * size
+    };
+  }
+
+  function worldToLatLng(x, y, zoom) {
+    const size = 256 * (2 ** zoom);
+    const lng = (x / size) * 360 - 180;
+    const n = Math.PI - (2 * Math.PI * y) / size;
+    const lat = (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+    return { lat, lng };
+  }
+
+  function liteMapCenter(selected, defaults, forcedZoom = null) {
+    const firstMapped = state.userLocation || state.searchQuery
+      ? sortedByDistance(filteredBathrooms()).find(hasCoordinates)
+      : null;
+    const selectedHasCoordinates = hasCoordinates(selected);
+    const center = selectedHasCoordinates
+      ? [Number(selected.lat), Number(selected.lng)]
+      : state.userLocation
+        ? [state.userLocation.lat, state.userLocation.lng]
+        : hasCoordinates(firstMapped)
+          ? [Number(firstMapped.lat), Number(firstMapped.lng)]
+          : defaults.center;
+    const zoom = forcedZoom ?? (selectedHasCoordinates ? Math.max(Number(defaults.zoom || 14), 16) : Number(defaults.zoom || 14));
+    return { center, zoom: clamp(Math.round(zoom), 1, 19) };
+  }
+
+  function renderLiteTiles(container, center, zoom, defaults) {
+    const width = Math.max(container.clientWidth || 0, 320);
+    const height = Math.max(container.clientHeight || 0, 180);
+    const centerWorld = latLngToWorld(center[0], center[1], zoom);
+    const topLeft = {
+      x: centerWorld.x - width / 2,
+      y: centerWorld.y - height / 2
+    };
+    const tileSize = 256;
+    const tileCount = 2 ** zoom;
+    const startX = Math.floor(topLeft.x / tileSize);
+    const startY = Math.floor(topLeft.y / tileSize);
+    const endX = Math.floor((topLeft.x + width) / tileSize);
+    const endY = Math.floor((topLeft.y + height) / tileSize);
+    const tiles = [];
+
+    for (let y = startY; y <= endY; y += 1) {
+      if (y < 0 || y >= tileCount) continue;
+      for (let x = startX; x <= endX; x += 1) {
+        const wrappedX = ((x % tileCount) + tileCount) % tileCount;
+        tiles.push(`
+          <img
+            class="lite-map__tile"
+            alt=""
+            src="${escapeHtml(tileUrl(defaults.tileUrl, zoom, wrappedX, y))}"
+            style="left:${Math.round(x * tileSize - topLeft.x)}px;top:${Math.round(y * tileSize - topLeft.y)}px"
+            loading="eager"
+          />
+        `);
+      }
+    }
+
+    return { html: tiles.join(''), topLeft, width, height };
+  }
+
+  function pointForLocation(location, topLeft, zoom) {
+    const world = latLngToWorld(location.lat, location.lng, zoom);
+    return {
+      x: world.x - topLeft.x,
+      y: world.y - topLeft.y
+    };
+  }
+
+  function updateLiteMap(container) {
+    const defaults = mapDefaults();
+    const selected = selectedMapBathroom();
+    const { center, zoom } = liteMapCenter(selected, defaults);
+    const tileResult = renderLiteTiles(container, center, zoom, defaults);
+    const bathroomsToShow = bathroomsForMap(selected);
+    const pins = bathroomsToShow.filter(hasCoordinates).map((bathroom) => {
+      const point = pointForLocation(bathroom, tileResult.topLeft, zoom);
+      const isActive = bathroom.id === state.selectedBathroomId;
+      return `
+        <button
+          class="lite-map-pin ${isActive ? 'is-active' : ''}"
+          data-lite-bathroom-id="${escapeHtml(bathroom.id)}"
+          style="left:${Math.round(point.x)}px;top:${Math.round(point.y)}px"
+          title="${escapeHtml(bathroom.name)}"
+        >
+          <span>*</span>${rounded(bathroom.rating)}
+        </button>
+      `;
+    }).join('');
+
+    const userPoint = state.userLocation
+      ? pointForLocation(state.userLocation, tileResult.topLeft, zoom)
+      : null;
+    const routeTarget = bathrooms().find((item) => item.id === state.routeBathroomId);
+    const routePoint = state.userLocation && hasCoordinates(routeTarget)
+      ? pointForLocation(routeTarget, tileResult.topLeft, zoom)
+      : null;
+    const route = userPoint && routePoint ? (() => {
+      const dx = routePoint.x - userPoint.x;
+      const dy = routePoint.y - userPoint.y;
+      const length = Math.sqrt(dx * dx + dy * dy);
+      const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+      return `<span class="lite-map-route" style="left:${Math.round(userPoint.x)}px;top:${Math.round(userPoint.y)}px;width:${Math.round(length)}px;transform:rotate(${angle}deg)"></span>`;
+    })() : '';
+    const userMarker = userPoint
+      ? `<span class="lite-user-marker" style="left:${Math.round(userPoint.x)}px;top:${Math.round(userPoint.y)}px"><span></span></span>`
+      : '';
+
+    container.innerHTML = `
+      <div class="lite-map" data-lite-map>
+        ${tileResult.html}
+        ${route}
+        ${pins}
+        ${userMarker}
+        <div class="lite-map__notice">Lite map</div>
+        <div class="lite-map__attribution">${defaults.attribution}</div>
+      </div>
+    `;
+
+    container.querySelectorAll('[data-lite-bathroom-id]').forEach((pin) => {
+      pin.addEventListener('click', (event) => {
+        event.stopPropagation();
+        setState({ selectedBathroomId: pin.dataset.liteBathroomId, mapHasMoved: true });
+      });
+    });
+  }
+
+  function updateLiteAddBathroomMap(container) {
+    const location = state.addBathroomLocation || state.userLocation;
+    if (!hasCoordinates(location)) return;
+    const defaults = mapDefaults();
+    const zoom = 18;
+    const center = [Number(location.lat), Number(location.lng)];
+    const tileResult = renderLiteTiles(container, center, zoom, defaults);
+
+    container.innerHTML = `
+      <div class="lite-map lite-map--picker" data-lite-add-map>
+        ${tileResult.html}
+        <span class="registration-location-pin lite-registration-pin">${icon('plus')}</span>
+        <div class="lite-map__notice">Tap map to move pin</div>
+        <div class="lite-map__attribution">${defaults.attribution}</div>
+      </div>
+    `;
+
+    const map = container.querySelector('[data-lite-add-map]');
+    map?.addEventListener('click', (event) => {
+      const rect = map.getBoundingClientRect();
+      const x = tileResult.topLeft.x + event.clientX - rect.left;
+      const y = tileResult.topLeft.y + event.clientY - rect.top;
+      setAddBathroomLocation({
+        ...worldToLatLng(x, y, zoom),
+        updatedAt: new Date().toISOString()
+      });
+    });
+  }
+
   function updateLeafletMap() {
     const container = document.querySelector('#unpissed-map');
     if (!container || !['map', 'checkin'].includes(state.activeTab) || state.loading || state.backendStatus === 'missing') return;
     if (!window.L) {
-      container.innerHTML = '<div class="map-empty">Map library did not load.</div>';
+      updateLiteMap(container);
       window.UnpissedLeafletVendorReady?.then?.(() => queueMapRender()).catch(() => {});
       return;
     }
@@ -1867,7 +2044,7 @@
       return;
     }
     if (!window.L) {
-      container.innerHTML = '<div class="map-empty">Map library did not load.</div>';
+      updateLiteAddBathroomMap(container);
       window.UnpissedLeafletVendorReady?.then?.(() => queueAddBathroomMapRender()).catch(() => {});
       return;
     }

@@ -4,10 +4,6 @@
     'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
     'https://unpkg.com/@supabase/supabase-js@2'
   ];
-  const LEAFLET_SOURCES = [
-    'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
-    'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js'
-  ];
 
   function loadScript(src) {
     return new Promise((resolve, reject) => {
@@ -56,10 +52,7 @@
     SUPABASE_SOURCES,
     () => Boolean(window.supabase?.createClient)
   );
-  window.UnpissedLeafletVendorReady = loadFirstAvailable(
-    LEAFLET_SOURCES,
-    () => Boolean(window.L)
-  );
+  window.UnpissedLeafletVendorReady = Promise.resolve(Boolean(window.L));
   window.UnpissedVendorsReady = Promise.allSettled([
     window.UnpissedSupabaseVendorReady,
     window.UnpissedLeafletVendorReady
