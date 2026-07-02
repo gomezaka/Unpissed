@@ -13,12 +13,10 @@ exports.handler = async (event) => {
   }
 
   return {
-    statusCode: 200,
+    statusCode: 410,
     headers,
     body: JSON.stringify({
-      mode: 'scaffold',
-      moderationStatus: 'pending',
-      rules: ['no_people', 'no_nudity', 'no_explicit_bathroom_content', 'useful_context_only']
+      error: 'Removed endpoint. Photo moderation is represented in Supabase and handled outside this static app.'
     })
   };
 };

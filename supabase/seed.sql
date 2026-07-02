@@ -8,7 +8,15 @@ insert into public.badges (id, title, subtitle, description, icon) values
   ('pub-crawl-plumber', 'Pub Crawl Plumber', 'One night. Five stops. Questionable decisions.', 'Check in at 5 different bathrooms in one night.', 'route'),
   ('porcelain-royalty', 'Porcelain Royalty', 'You sat where legends sit.', 'Visit the highest-rated bathroom in a city.', 'crown'),
   ('hidden-gem-hunter', 'Hidden Gem Hunter', 'You found the throne before it was famous.', 'Be the first to add a bathroom that later becomes highly rated.', 'spark'),
-  ('night-watch', 'Night Watch', 'Rated after midnight. Brave work.', 'Check in between midnight and 04:00.', 'moon')
+  ('night-watch', 'Night Watch', 'Rated after midnight. Brave work.', 'Check in between midnight and 04:00.', 'moon'),
+  ('country-norway', 'Norway Relief', 'First check-in in Norway.', 'Check in at a bathroom in Norway.', 'flag-no'),
+  ('country-denmark', 'Denmark Relief', 'First check-in in Denmark.', 'Check in at a bathroom in Denmark.', 'flag-dk'),
+  ('country-ireland', 'Ireland Relief', 'First check-in in Ireland.', 'Check in at a bathroom in Ireland.', 'flag-ie'),
+  ('country-sweden', 'Sweden Relief', 'First check-in in Sweden.', 'Check in at a bathroom in Sweden.', 'flag-se'),
+  ('country-finland', 'Finland Relief', 'First check-in in Finland.', 'Check in at a bathroom in Finland.', 'flag-fi'),
+  ('forest-first-relief', 'Forest First Relief', 'You logged one in the wild.', 'Check in at an outdoor, forest, trail or nature bathroom.', 'forest'),
+  ('forest-trail-regular', 'Trail Regular', 'Three outdoor check-ins. Rugged.', 'Check in at outdoor or forest bathrooms three times.', 'forest'),
+  ('forest-legend', 'Forest Legend', 'Ten outdoor check-ins. Mythic logistics.', 'Check in at outdoor or forest bathrooms ten times.', 'forest')
 on conflict (id) do update set
   title = excluded.title,
   subtitle = excluded.subtitle,

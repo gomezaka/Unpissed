@@ -11,12 +11,49 @@
     soundSafety: 'Sound Safety'
   };
 
+  const COUNTRY_BADGE_IDS = {
+    norge: 'country-norway',
+    norway: 'country-norway',
+    danmark: 'country-denmark',
+    denmark: 'country-denmark',
+    irland: 'country-ireland',
+    ireland: 'country-ireland',
+    eire: 'country-ireland',
+    sverige: 'country-sweden',
+    sweden: 'country-sweden',
+    finland: 'country-finland',
+    suomi: 'country-finland'
+  };
+
+  const COUNTRY_BY_CODE = {
+    no: 'Norway',
+    dk: 'Denmark',
+    ie: 'Ireland',
+    se: 'Sweden',
+    fi: 'Finland',
+    gb: 'United Kingdom',
+    de: 'Germany',
+    fr: 'France',
+    es: 'Spain',
+    nl: 'Netherlands'
+  };
+
+  const COUNTRY_BOUNDS = [
+    { country: 'Norway', minLat: 57.8, maxLat: 71.4, minLng: 4.0, maxLng: 31.5 },
+    { country: 'Denmark', minLat: 54.4, maxLat: 57.9, minLng: 7.6, maxLng: 15.3 },
+    { country: 'Ireland', minLat: 51.2, maxLat: 55.6, minLng: -10.9, maxLng: -5.3 },
+    { country: 'Sweden', minLat: 55.0, maxLat: 69.2, minLng: 10.5, maxLng: 24.3 },
+    { country: 'Finland', minLat: 59.5, maxLat: 70.2, minLng: 19.0, maxLng: 31.7 }
+  ];
+
   const defaultState = {
     activeTab: 'map',
     selectedBathroomId: null,
     modal: null,
     anonymous: true,
     checkinBathroomId: null,
+    checkinSubmitting: false,
+    checkinError: '',
     searchQuery: '',
     routeBathroomId: null,
     authUser: null,
@@ -34,6 +71,9 @@
     badges: [],
     userBadges: [],
     feed: [],
+    profiles: [],
+    follows: [],
+    friendQuery: '',
     reviewsByBathroom: {},
     loading: true,
     filters: {
@@ -45,7 +85,8 @@
     userLocation: null,
     geoStatus: 'idle',
     geoError: '',
-    mapHasMoved: false
+    mapHasMoved: false,
+    mapVisible: false
   };
 
   let state = { ...defaultState };
@@ -140,6 +181,7 @@
       locate: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path></svg>',
       map: '<svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18 3 21V6l6-3 6 3 6-3v15l-6 3-6-3Z"></path><path d="M9 3v15M15 6v15"></path></svg>',
       feed: '<svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13"></path><path d="M3 6h.01M3 12h.01M3 18h.01"></path></svg>',
+      friends: '<svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>',
       plus: '<svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>',
       badge: '<svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="5"></circle><path d="m8.5 13-2 8 5.5-3 5.5 3-2-8"></path></svg>',
       user: '<svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 21a8 8 0 1 0-16 0"></path><circle cx="12" cy="7" r="4"></circle></svg>',
@@ -148,11 +190,22 @@
       close: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>',
       star: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2Z"></path></svg>',
       route: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 19a3 3 0 1 1 0-6c3 0 5 3 8 3a4 4 0 0 0 0-8"></path><circle cx="18" cy="5" r="2"></circle><circle cx="6" cy="19" r="2"></circle></svg>',
+      flag: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21V4"></path><path d="M5 4h12l-1 5 1 5H5"></path></svg>',
+      forest: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 7 8h-4l3 5h-4v5h-4v-5H6l3-5H5l7-8Z"></path></svg>',
       camera: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 4.5 16 7h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h3l1.5-2.5h5Z"></path><circle cx="12" cy="13" r="3"></circle></svg>',
       filter: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"></path></svg>',
       lock: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>'
     };
     return icons[name] || '';
+  }
+
+  function badgeIcon(badge) {
+    const iconName = String((typeof badge === 'string' ? badge : badge?.icon) || 'badge');
+    if (iconName.startsWith('flag-')) {
+      const code = iconName.slice(5).toLowerCase().replace(/[^a-z0-9-]/g, '');
+      return `<span class="flag-icon flag-icon--${escapeHtml(code)}" aria-hidden="true"></span>`;
+    }
+    return icon(iconName) || icon('badge');
   }
 
   function escapeHtml(value) {
@@ -208,6 +261,140 @@
   function initialsFromName(name = '') {
     const parts = String(name || currentDisplayName()).trim().split(/\s+/).filter(Boolean);
     return parts.slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'UP';
+  }
+
+  function normalizeKey(value) {
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+  }
+
+  function uniqueList(values) {
+    const seen = new Set();
+    return values
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+      .filter((value) => {
+        const key = normalizeKey(value);
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }
+
+  function countryBadgeId(country) {
+    const key = normalizeKey(country);
+    return COUNTRY_BADGE_IDS[key] ||
+      Object.entries(COUNTRY_BADGE_IDS).find(([name]) => key.includes(name))?.[1] ||
+      null;
+  }
+
+  function countryNameFromCode(code) {
+    return COUNTRY_BY_CODE[String(code || '').toLowerCase()] || '';
+  }
+
+  function countryFromCoordinates(location) {
+    if (!location) return '';
+    const lat = Number(location.lat);
+    const lng = Number(location.lng);
+    if (![lat, lng].every(Number.isFinite)) return '';
+    const match = COUNTRY_BOUNDS.find((item) =>
+      lat >= item.minLat &&
+      lat <= item.maxLat &&
+      lng >= item.minLng &&
+      lng <= item.maxLng
+    );
+    return match?.country || '';
+  }
+
+  async function resolveCountryForLocation(location) {
+    const fallback = countryFromCoordinates(location);
+    if (!location || window.UNPISSED_CONFIG?.ENABLE_REVERSE_GEOCODING === false) return fallback;
+
+    const lat = Number(location.lat);
+    const lng = Number(location.lng);
+    if (![lat, lng].every(Number.isFinite)) return fallback;
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 4500);
+
+    try {
+      const url = new URL(window.UNPISSED_CONFIG?.REVERSE_GEOCODE_URL || 'https://nominatim.openstreetmap.org/reverse');
+      url.searchParams.set('format', 'jsonv2');
+      url.searchParams.set('addressdetails', '1');
+      url.searchParams.set('zoom', '3');
+      url.searchParams.set('lat', String(lat));
+      url.searchParams.set('lon', String(lng));
+      const response = await fetch(url.toString(), {
+        headers: { Accept: 'application/json' },
+        signal: controller.signal
+      });
+      if (!response.ok) throw new Error('Reverse geocoding failed.');
+      const data = await response.json();
+      return data?.address?.country || countryNameFromCode(data?.address?.country_code) || fallback;
+    } catch {
+      return fallback;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
+  function isOutdoorBathroom(item = {}) {
+    const haystack = normalizeKey([
+      item.type,
+      item.bathroomType,
+      item.access,
+      ...(item.facilities || []),
+      ...(item.vibeTags || [])
+    ].join(' '));
+    return ['outdoor', 'forest', 'nature', 'woods', 'trail', 'camping', 'park', 'skog', 'friluft', 'wilderness']
+      .some((term) => haystack.includes(term));
+  }
+
+  function followSets() {
+    const currentUserId = state.authUser?.id;
+    const followingIds = new Set();
+    const followerIds = new Set();
+    (state.follows || []).forEach((row) => {
+      if (row.follower_id === currentUserId && row.following_id) followingIds.add(row.following_id);
+      if (row.following_id === currentUserId && row.follower_id) followerIds.add(row.follower_id);
+    });
+    const friendIds = new Set([...followingIds].filter((id) => followerIds.has(id)));
+    return { followingIds, followerIds, friendIds };
+  }
+
+  function filteredProfilesForFriends(sets = followSets()) {
+    const currentUserId = state.authUser?.id;
+    const term = String(state.friendQuery || '').trim().toLowerCase();
+    return (state.profiles || [])
+      .filter((profile) => profile.id && profile.id !== currentUserId)
+      .filter((profile) => {
+        if (!term) return true;
+        return [profile.displayName, profile.handle, profile.city].join(' ').toLowerCase().includes(term);
+      })
+      .sort((a, b) => {
+        const aRank = sets.friendIds.has(a.id) ? 0 : sets.followerIds.has(a.id) ? 1 : sets.followingIds.has(a.id) ? 2 : 3;
+        const bRank = sets.friendIds.has(b.id) ? 0 : sets.followerIds.has(b.id) ? 1 : sets.followingIds.has(b.id) ? 2 : 3;
+        if (aRank !== bRank) return aRank - bRank;
+        return String(a.displayName || '').localeCompare(String(b.displayName || ''));
+      });
+  }
+
+  function friendMeta(profile, sets) {
+    if (sets.friendIds.has(profile.id)) return 'Friends';
+    if (sets.followerIds.has(profile.id)) return 'Follows you';
+    if (sets.followingIds.has(profile.id)) return 'Added';
+    return profile.city || profile.handle || 'Not connected';
+  }
+
+  function friendActionLabel(profile, sets) {
+    if (sets.friendIds.has(profile.id)) return 'Remove';
+    if (sets.followingIds.has(profile.id)) return 'Cancel';
+    if (sets.followerIds.has(profile.id)) return 'Accept';
+    return 'Add';
   }
 
   function timeAgo(value) {
@@ -285,7 +472,8 @@
     if (state.loading) return renderLoadingState();
     if (state.backendStatus === 'missing') return renderMissingConfigState();
     switch (state.activeTab) {
-      case 'feed': return renderFeedPage();
+      case 'friends':
+      case 'feed': return renderFriendsPage();
       case 'checkin': return renderCheckinPage();
       case 'badges': return renderBadgesPage();
       case 'profile': return renderProfilePage();
@@ -318,6 +506,8 @@
   function renderMapPage() {
     const bathroom = selectedMapBathroom();
     const hasBathrooms = bathrooms().length > 0;
+    const showMap = state.mapVisible || Boolean(state.routeBathroomId);
+    const visibleCount = filteredBathrooms().length;
     return `
       <button class="emergency-card" data-action="open-emergency">
         <div>
@@ -331,17 +521,16 @@
       ${renderSearchBar()}
       ${renderFilterBar()}
       <div class="section-row">
-        <h2 class="section-title">Bathroom hotspots nearby</h2>
-        <span class="section-meta">${filteredBathrooms().length} visible</span>
+        <h2 class="section-title">${showMap ? (state.routeBathroomId ? 'Emergency route' : 'Map view') : 'Closest bathrooms'}</h2>
+        ${showMap ? '<button class="section-action" data-action="show-bathroom-list">List</button>' : `<span class="section-meta">${Math.min(10, visibleCount)} of ${visibleCount}</span>`}
       </div>
-      ${renderMap()}
-      ${renderNearbyList()}
-      ${bathroom ? renderBathroomCard(bathroom) : (hasBathrooms ? renderChooseMapFlagCard() : renderNoBathroomsCard())}
+      ${showMap ? renderMap() : ''}
+      ${showMap ? (bathroom ? renderBathroomCard(bathroom) : (hasBathrooms ? renderChooseMapFlagCard() : renderNoBathroomsCard())) : (hasBathrooms ? renderClosestBathroomList() : renderNoBathroomsCard())}
       ${renderTrustCard()}
 
       <div class="section-row">
         <h2 class="section-title">Tonight around you</h2>
-        <button class="section-action" data-tab="feed">See all</button>
+        <button class="section-action" data-tab="friends">See all</button>
       </div>
       ${renderActivityCard(state.feed)}
       ${renderBadgeTeaser()}
@@ -400,6 +589,25 @@
             <b>${escapeHtml(bathroom.name)}</b>
             <span>${rounded(bathroom.rating)} ★ · ${escapeHtml(distanceLabel(bathroom))}</span>
           </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function renderClosestBathroomList() {
+    const visible = sortedByDistance(filteredBathrooms()).slice(0, 10);
+    if (!visible.length) return '<div class="empty-state">No bathrooms match these filters.</div>';
+    return `
+      <div class="closest-list" aria-label="Closest bathrooms">
+        ${visible.map((bathroom, index) => `
+          <button class="closest-row" data-action="open-map-bathroom" data-bathroom-id="${escapeHtml(bathroom.id)}">
+            <span class="closest-rank">${index + 1}</span>
+            <span class="closest-copy">
+              <b>${escapeHtml(bathroom.name)}</b>
+              <small>${rounded(bathroom.rating)} star &middot; ${escapeHtml(distanceLabel(bathroom))}</small>
+            </span>
+            <span class="closest-meta">${escapeHtml(bathroom.status || 'OPEN')}</span>
+          </button>
         `).join('')}
       </div>
     `;
@@ -571,7 +779,7 @@
     if (!badge) return '';
     return `
       <article class="badge-card">
-        <div class="badge-medallion">${icon('pulse')}</div>
+        <div class="badge-medallion">${badgeIcon(badge)}</div>
         <div>
           <p class="badge-kicker">${unlockedBadge ? 'Badge unlocked' : 'Next badge'}</p>
           <h2 class="badge-title">${escapeHtml(badge.title)}</h2>
@@ -582,19 +790,88 @@
     `;
   }
 
-  function renderFeedPage() {
+  function renderFriendRow(profile, sets) {
+    const isFollowing = sets.followingIds.has(profile.id);
+    const isFriend = sets.friendIds.has(profile.id);
+    const handle = profile.handle ? `@${profile.handle}` : (profile.city || 'Unpissed user');
+    return `
+      <article class="friend-row">
+        <div class="mini-avatar blue">${escapeHtml(profile.initials || initialsFromName(profile.displayName))}</div>
+        <div class="friend-row__copy">
+          <b>${escapeHtml(profile.displayName || 'Unpissed User')}</b>
+          <small>${escapeHtml(handle)} &middot; ${escapeHtml(friendMeta(profile, sets))}</small>
+        </div>
+        <button
+          class="friend-action ${isFollowing ? 'is-added' : ''} ${isFriend ? 'is-friend' : ''}"
+          data-action="toggle-friend"
+          data-user-id="${escapeHtml(profile.id)}"
+        >${escapeHtml(friendActionLabel(profile, sets))}</button>
+      </article>
+    `;
+  }
+
+  function renderFriendsPage() {
+    const sets = followSets();
+    const people = filteredProfilesForFriends(sets);
+    const signedIn = Boolean(state.authUser);
+    const friendCount = sets.friendIds.size;
+    const followingCount = sets.followingIds.size;
+    const followerCount = sets.followerIds.size;
+    const peopleCount = state.profiles?.length || 0;
+
+    if (!signedIn) {
+      return `
+        <section class="content-page">
+          <h2 class="page-title">Friends</h2>
+          <p class="page-subtitle">Sign in to add people and see mutual friend status.</p>
+          <article class="simple-card friend-radar">
+            <div class="card-kicker">Private by default</div>
+            <p class="privacy-note">Anonymous check-ins stay anonymous. Friend activity uses delayed, non-exact sharing.</p>
+            <div class="friend-card-actions">
+              <button class="primary-button full-width" data-action="open-auth">Sign in</button>
+            </div>
+          </article>
+          <div class="section-row">
+            <h2 class="section-title">Activity</h2>
+          </div>
+          ${renderActivityCard(state.feed)}
+        </section>
+      `;
+    }
+
     return `
       <section class="content-page">
-        <h2 class="page-title">Feed</h2>
-        <p class="page-subtitle">Friend activity, trending thrones and questionable little victories.</p>
+        <h2 class="page-title">Friends</h2>
+        <p class="page-subtitle">Add the people you trust, then keep the bathroom logistics humane.</p>
+        <div class="stats-grid">
+          <div class="stat-card"><b>${friendCount}</b><span>Friends</span></div>
+          <div class="stat-card"><b>${followingCount}</b><span>Following</span></div>
+          <div class="stat-card"><b>${followerCount}</b><span>Followers</span></div>
+          <div class="stat-card"><b>${peopleCount}</b><span>People</span></div>
+        </div>
+        <form class="search-card friends-search" data-form="friends-search">
+          <label class="sr-only" for="friend-search">Search people</label>
+          <input id="friend-search" name="query" value="${escapeHtml(state.friendQuery || '')}" placeholder="Search people" autocomplete="off" />
+          ${state.friendQuery ? '<button class="search-clear" type="button" data-action="clear-friend-search">Clear</button>' : ''}
+          <button class="search-submit" type="submit">Search</button>
+        </form>
         <article class="simple-card friend-radar">
           <div class="card-kicker">Privacy by default</div>
-          <p class="privacy-note">Activity is designed for delayed, non-exact sharing. No live bathroom location is shown by default.</p>
+          <p class="privacy-note">Mutual follows become friends. Anonymous mode still hides your name in public activity.</p>
         </article>
-        <div style="height:12px"></div>
+        <div class="friend-list">
+          ${people.length ? people.map((profile) => renderFriendRow(profile, sets)).join('') : '<div class="empty-state">No people found yet.</div>'}
+        </div>
+        <div class="section-row">
+          <h2 class="section-title">Activity</h2>
+        </div>
         ${renderActivityCard(state.feed)}
       </section>
     `;
+  }
+
+  function renderFeedPage() {
+    return renderFriendsPage();
   }
 
   function renderCheckinPage() {
@@ -622,7 +899,7 @@
             const unlocked = unlockedIds.has(badge.id);
             return `
               <article class="badge-list-item ${unlocked ? '' : 'is-locked'}">
-                <div class="badge-list-icon">${icon('badge')}</div>
+                <div class="badge-list-icon">${badgeIcon(badge)}</div>
                 <div class="badge-list-copy">
                   <h3>${escapeHtml(badge.title)} ${unlocked ? '<span class="gold-text">✓</span>' : '<span class="faint-text">Locked</span>'}</h3>
                   <p>${escapeHtml(badge.subtitle || '')}</p>
@@ -688,8 +965,8 @@
 
   function renderBottomNav() {
     const items = [
-      ['map', 'Map', 'map'],
-      ['feed', 'Feed', 'feed'],
+      ['map', 'Nearby', 'map'],
+      ['friends', 'Friends', 'friends'],
       ['checkin', 'Check In', 'plus'],
       ['badges', 'Badges', 'badge'],
       ['profile', 'Profile', 'user']
@@ -772,6 +1049,7 @@
           <h3>${escapeHtml(bathroom.name)}</h3>
           <p>Rate the relief. Keep it useful, not gross.</p>
         </div>
+        ${state.checkinError ? `<div class="auth-error" role="alert">${escapeHtml(state.checkinError)}</div>` : ''}
         <div class="range-grid">${criteriaRows}</div>
         <label class="form-field">
           <span>Comment</span>
@@ -786,7 +1064,7 @@
           <div><b>Anonymous check-in</b><span>Hide your name in public activity.</span></div>
           <button class="switch ${state.anonymous ? 'is-on' : ''}" type="button" aria-pressed="${state.anonymous}" data-action="toggle-anonymous" aria-label="Toggle anonymous check-in"></button>
         </div>
-        <button class="primary-button full-width" type="submit">Check in on the throne</button>
+        <button class="primary-button full-width" type="submit" ${state.checkinSubmitting ? 'disabled' : ''}>${state.checkinSubmitting ? 'Saving check-in...' : 'Check in on the throne'}</button>
       </form>
     `;
     return renderModalShell('Check In', 'You survived. How was it?', body);
@@ -846,16 +1124,16 @@
           <input name="name" required maxlength="80" placeholder="Venue or bathroom name" />
         </label>
         <div class="field-grid">
-          <label class="form-field"><span>Type</span><select name="type"><option>Bar</option><option>Restaurant</option><option>Café</option><option>Club</option><option>Venue</option><option>Public</option><option>Other</option></select></label>
+          <label class="form-field"><span>Type</span><select name="type"><option>Bar</option><option>Restaurant</option><option>Café</option><option>Club</option><option>Venue</option><option>Public</option><option>Outdoor</option><option>Forest</option><option>Other</option></select></label>
           <label class="form-field"><span>Access</span><select name="accessMode"><option value="public">Public</option><option value="no-code">No code</option><option value="code-needed">Code needed</option><option value="customer-only">Customer-only</option><option value="paid">Paid</option><option value="unknown">Unknown</option></select></label>
         </div>
         <label class="form-field">
           <span>Access note</span>
-          <input name="access" maxlength="120" placeholder="Public-ish · No code · Great lighting" />
+          <input name="access" maxlength="120" placeholder="Public-ish · No code · Trail / forest stop" />
         </label>
         <label class="form-field">
           <span>Facilities</span>
-          <input name="facilities" maxlength="180" placeholder="Accessible, Soap, Mirror, Hooks" />
+          <input name="facilities" maxlength="180" placeholder="Accessible, Soap, Mirror, Hooks, Forest" />
           <small>Comma-separated.</small>
         </label>
         <label class="form-field">
@@ -865,7 +1143,7 @@
         <article class="location-capture">
           <div>
             <b>Map position</b>
-            <small>${state.userLocation ? `Will save current location: ${Number(state.userLocation.lat).toFixed(5)}, ${Number(state.userLocation.lng).toFixed(5)}` : 'Enable location before adding to place the bathroom on the map.'}</small>
+            <small>${state.userLocation ? `Will save current location: ${Number(state.userLocation.lat).toFixed(5)}, ${Number(state.userLocation.lng).toFixed(5)}. Country is detected automatically.` : 'Enable location before adding to place the bathroom on the map and detect country.'}</small>
           </div>
           <button type="button" class="secondary-button" data-action="request-location">${state.userLocation ? 'Refresh' : 'Use my location'}</button>
         </article>
@@ -933,6 +1211,7 @@
 
     document.querySelectorAll('[data-form="auth"]').forEach((form) => form.addEventListener('submit', handleAuthSubmit));
     document.querySelectorAll('[data-form="bathroom-search"]').forEach((form) => form.addEventListener('submit', handleSearchSubmit));
+    document.querySelectorAll('[data-form="friends-search"]').forEach((form) => form.addEventListener('submit', handleFriendsSearch));
     document.querySelectorAll('[data-form="checkin"]').forEach((form) => form.addEventListener('submit', handleCheckinSubmit));
     document.querySelectorAll('[data-form="add-bathroom"]').forEach((form) => form.addEventListener('submit', handleAddBathroomSubmit));
   }
@@ -960,12 +1239,30 @@
             setState({ activeTab: 'map', modal: null });
             return;
           }
-          setState({ modal: 'checkin', checkinBathroomId: bathroomId });
+          setState({ modal: 'checkin', checkinBathroomId: bathroomId, checkinSubmitting: false, checkinError: '' });
         }
         break;
       case 'open-details':
         setState({ modal: 'details', selectedBathroomId: element.dataset.bathroomId || state.selectedBathroomId });
         loadReviews(element.dataset.bathroomId || state.selectedBathroomId);
+        break;
+      case 'open-map-bathroom':
+        setState({
+          activeTab: 'map',
+          modal: null,
+          selectedBathroomId: element.dataset.bathroomId,
+          routeBathroomId: null,
+          mapVisible: true,
+          mapHasMoved: true
+        });
+        break;
+      case 'show-bathroom-list':
+        setState({
+          mapVisible: false,
+          routeBathroomId: null,
+          selectedBathroomId: null,
+          mapHasMoved: false
+        });
         break;
       case 'open-add-bathroom':
         if (!state.authUser) {
@@ -1001,6 +1298,12 @@
       case 'clear-search':
         setState({ searchQuery: '' });
         break;
+      case 'clear-friend-search':
+        setState({ friendQuery: '' });
+        break;
+      case 'toggle-friend':
+        await toggleFriend(element.dataset.userId);
+        break;
       case 'report-privacy':
         await reportPrivacyIssue();
         break;
@@ -1020,7 +1323,14 @@
         }
         if (!state.userLocation) await requestUserLocation({ silent: true });
         toast('Emergency route ready', state.userLocation ? 'Follow the blue line. Dignity may be restored.' : 'Location is needed for the blue line.');
-        setState({ modal: null, selectedBathroomId: bathroomId, routeBathroomId: bathroomId });
+        setState({
+          activeTab: 'map',
+          modal: null,
+          selectedBathroomId: bathroomId,
+          routeBathroomId: bathroomId,
+          mapVisible: true,
+          mapHasMoved: true
+        });
         break;
       }
       case 'request-location':
@@ -1070,19 +1380,21 @@
 
     const selected = selectedMapBathroom();
     const firstMapped = sortedByDistance(filteredBathrooms()).find(hasCoordinates);
-    const startCenter = state.userLocation
-      ? [state.userLocation.lat, state.userLocation.lng]
-      : hasCoordinates(selected)
-        ? [Number(selected.lat), Number(selected.lng)]
+    const selectedHasCoordinates = hasCoordinates(selected);
+    const startCenter = selectedHasCoordinates
+      ? [Number(selected.lat), Number(selected.lng)]
+      : state.userLocation
+        ? [state.userLocation.lat, state.userLocation.lng]
         : hasCoordinates(firstMapped)
           ? [Number(firstMapped.lat), Number(firstMapped.lng)]
           : defaults.center;
+    const startZoom = selectedHasCoordinates ? Math.max(Number(defaults.zoom || 14), 17) : defaults.zoom;
 
     if (!leafletMap) {
       leafletMap = window.L.map(container, {
         zoomControl: false,
         attributionControl: true
-      }).setView(startCenter, defaults.zoom);
+      }).setView(startCenter, startZoom);
       window.L.control.zoom({ position: 'bottomright' }).addTo(leafletMap);
       window.L.tileLayer(defaults.tileUrl, {
         maxZoom: 19,
@@ -1104,7 +1416,7 @@
           iconAnchor: [29, 32]
         })
       });
-      marker.on('click', () => setState({ selectedBathroomId: bathroom.id }));
+      marker.on('click', () => setState({ selectedBathroomId: bathroom.id, mapHasMoved: true }));
       marker.bindPopup(`<b>${escapeHtml(bathroom.name)}</b><br>${rounded(bathroom.rating)} ★ · ${escapeHtml(distanceLabel(bathroom))}`);
       marker.addTo(markerLayer);
       markers.push(marker);
@@ -1131,7 +1443,8 @@
       routeLine = null;
     }
     const routeTarget = bathrooms().find((item) => item.id === state.routeBathroomId);
-    if (state.userLocation && hasCoordinates(routeTarget)) {
+    const routeHasCoordinates = state.userLocation && hasCoordinates(routeTarget);
+    if (routeHasCoordinates) {
       routeLine = window.L.polyline([
         [state.userLocation.lat, state.userLocation.lng],
         [Number(routeTarget.lat), Number(routeTarget.lng)]
@@ -1146,7 +1459,19 @@
     const boundsItems = [];
     if (state.userLocation) boundsItems.push([state.userLocation.lat, state.userLocation.lng]);
     markers.forEach((marker) => boundsItems.push(marker.getLatLng()));
-    if (boundsItems.length >= 2 && !state.mapHasMoved) {
+    if (routeHasCoordinates) {
+      leafletMap.fitBounds(routeLine.getBounds(), {
+        padding: [44, 44],
+        maxZoom: 17,
+        animate: true
+      });
+    } else if (selectedHasCoordinates && state.mapHasMoved) {
+      leafletMap.setView(
+        [Number(selected.lat), Number(selected.lng)],
+        Math.max(leafletMap.getZoom(), startZoom),
+        { animate: true }
+      );
+    } else if (boundsItems.length >= 2 && !state.mapHasMoved) {
       leafletMap.fitBounds(boundsItems, { padding: [36, 36], maxZoom: 16 });
     } else if (state.userLocation && !state.mapHasMoved) {
       leafletMap.setView([state.userLocation.lat, state.userLocation.lng], 15);
@@ -1229,14 +1554,17 @@
       return;
     }
     try {
-      const [remoteBathrooms, badges, feed] = await Promise.all([
+      const [remoteBathrooms, badges, feed, checkins, userBadges, profiles, follows] = await Promise.all([
         API.listBathrooms(),
         API.listBadges(),
-        API.listFeedEvents()
+        API.listFeedEvents(),
+        state.authUser ? API.listMyCheckins(state.authUser.id) : Promise.resolve([]),
+        state.authUser ? API.listUserBadges(state.authUser.id) : Promise.resolve([]),
+        state.authUser ? API.listProfiles(state.authUser.id) : Promise.resolve([]),
+        state.authUser ? API.listFollows(state.authUser.id) : Promise.resolve([])
       ]);
-      const checkins = state.authUser ? await API.listMyCheckins(state.authUser.id) : [];
-      const userBadges = state.authUser ? await API.listUserBadges(state.authUser.id) : [];
       const selectedStillExists = remoteBathrooms.some((item) => item.id === state.selectedBathroomId);
+      const routeStillExists = remoteBathrooms.some((item) => item.id === state.routeBathroomId);
       state = {
         ...state,
         bathrooms: remoteBathrooms,
@@ -1244,12 +1572,24 @@
         feed,
         checkins,
         userBadges,
+        profiles,
+        follows,
         loading: false,
         backendStatus: state.authUser ? 'live' : 'ready',
         selectedBathroomId: selectedStillExists ? state.selectedBathroomId : null,
+        routeBathroomId: routeStillExists ? state.routeBathroomId : null,
+        mapVisible: selectedStillExists || routeStillExists ? state.mapVisible : false,
         syncMessage: `${remoteBathrooms.length} bathrooms loaded from Supabase.`
       };
       render();
+      if (state.authUser && checkins.length) {
+        await updateBadgeUnlocks();
+        const refreshedUserBadges = await API.listUserBadges(state.authUser.id).catch(() => null);
+        if (refreshedUserBadges) {
+          state = { ...state, userBadges: refreshedUserBadges };
+          render();
+        }
+      }
       if (!options.silent) toast('Supabase synced', state.syncMessage);
     } catch (error) {
       state = { ...state, loading: false, backendStatus: 'error', syncMessage: `Sync failed: ${error.message}` };
@@ -1267,6 +1607,9 @@
         authProfile: null,
         checkins: [],
         userBadges: [],
+        profiles: [],
+        follows: [],
+        friendQuery: '',
         backendStatus: 'ready',
         syncMessage: 'Signed out. Public Supabase data remains visible.',
         modal: null
@@ -1275,6 +1618,52 @@
       toast('Signed out', 'Public bathroom data is still available.');
     } catch (error) {
       toast('Sign out failed', error.message);
+    }
+  }
+
+  async function refreshFriends(options = {}) {
+    if (!state.authUser) {
+      setState({ profiles: [], follows: [], friendQuery: '' });
+      return;
+    }
+    try {
+      const [profiles, follows] = await Promise.all([
+        API.listProfiles(state.authUser.id),
+        API.listFollows(state.authUser.id)
+      ]);
+      state = { ...state, profiles, follows };
+      render();
+      if (!options.silent) toast('Friends synced', `${profiles.length} people loaded.`);
+    } catch (error) {
+      toast('Friends failed', error.message);
+    }
+  }
+
+  async function toggleFriend(targetUserId) {
+    if (!state.authUser) {
+      toast('Sign in required', 'Friends are saved to Supabase and need an account.');
+      setState({ modal: 'auth' });
+      return;
+    }
+    if (!targetUserId || targetUserId === state.authUser.id) return;
+
+    const sets = followSets();
+    const profile = (state.profiles || []).find((item) => item.id === targetUserId);
+    const name = profile?.displayName || 'This user';
+    const isFollowing = sets.followingIds.has(targetUserId);
+    const followsYou = sets.followerIds.has(targetUserId);
+
+    try {
+      if (isFollowing) {
+        await API.unfollowUser(state.authUser.id, targetUserId);
+        toast('Friend removed', `${name} is no longer on your list.`);
+      } else {
+        await API.followUser(state.authUser.id, targetUserId);
+        toast(followsYou ? 'Friend added' : 'Request sent', followsYou ? `${name} is now a friend.` : `${name} has been added.`);
+      }
+      await refreshFriends({ silent: true });
+    } catch (error) {
+      toast('Friend update failed', error.message);
     }
   }
 
@@ -1374,8 +1763,16 @@
     setState({ searchQuery: query });
   }
 
+  function handleFriendsSearch(event) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const query = String(formData.get('query') || '').trim();
+    setState({ friendQuery: query });
+  }
+
   async function handleCheckinSubmit(event) {
     event.preventDefault();
+    if (state.checkinSubmitting) return;
     const form = event.currentTarget;
     const bathroom = bathrooms().find((b) => b.id === state.checkinBathroomId);
     if (!bathroom || !state.authUser) return;
@@ -1395,19 +1792,28 @@
       anonymous: state.anonymous
     };
 
+    state = { ...state, checkinSubmitting: true, checkinError: '' };
+    render();
+
     try {
       await API.createCheckin({ ...checkin, photo }, state.authUser.id);
-      await updateBadgeUnlocks();
       state = {
         ...state,
         modal: null,
-        activeTab: 'feed',
+        activeTab: 'friends',
+        checkinSubmitting: false,
+        checkinError: '',
         syncMessage: 'Check-in saved to Supabase.'
       };
       render();
       toast('Check-in saved', 'Saved to Supabase. Your family does not need to know.');
+      await updateBadgeUnlocks();
       await syncSupabase({ silent: true });
     } catch (error) {
+      setState({
+        checkinSubmitting: false,
+        checkinError: error.message || 'Check-in could not be saved.'
+      });
       toast('Supabase save failed', error.message);
     }
   }
@@ -1419,17 +1825,22 @@
     const name = String(formData.get('name') || '').trim();
     if (!name) return;
     const access = String(formData.get('access') || '').trim();
-    const facilities = String(formData.get('facilities') || '').split(',').map((item) => item.trim()).filter(Boolean);
+    const type = String(formData.get('type') || 'Other').trim() || 'Other';
+    const rawFacilities = String(formData.get('facilities') || '').split(',').map((item) => item.trim()).filter(Boolean);
+    const outdoor = isOutdoorBathroom({ type, access, facilities: rawFacilities });
+    const facilities = uniqueList([...rawFacilities, ...(outdoor ? ['Outdoor', 'Forest'] : [])]);
+    const country = await resolveCountryForLocation(state.userLocation);
     const input = {
       name,
-      type: String(formData.get('type') || 'Other'),
+      type,
       access: access || 'Access unknown',
       accessMode: String(formData.get('accessMode') || 'unknown'),
       facilities,
       city: String(formData.get('city') || '').trim(),
+      country,
       lat: state.userLocation?.lat ?? null,
       lng: state.userLocation?.lng ?? null,
-      vibeTags: facilities.slice(0, 3)
+      vibeTags: uniqueList([...facilities.slice(0, 3), ...(outdoor ? ['outdoor', 'forest', 'nature'] : [])])
     };
 
     try {
@@ -1443,7 +1854,7 @@
         syncMessage: 'Bathroom submitted to Supabase moderation.'
       };
       render();
-      toast('Bathroom added', 'Saved to Supabase as pending.');
+      toast('Bathroom added', 'Visible as unused until someone verifies it.');
       await syncSupabase({ silent: true });
     } catch (error) {
       toast('Supabase save failed', error.message);
@@ -1455,12 +1866,26 @@
     try {
       const latestCheckins = await API.listMyCheckins(state.authUser.id);
       const unique = new Set(latestCheckins.map((item) => item.bathroomId));
-      const toUnlock = [];
-      if (latestCheckins.length >= 1) toUnlock.push('emergency-landing');
-      if (unique.size >= 5) toUnlock.push('pub-crawl-plumber');
-      if (unique.size >= 10) toUnlock.push('golden-flush');
-      if (extra.bathroomAdded) toUnlock.push('hidden-gem-hunter');
-      await Promise.all(toUnlock.map((badgeId) => API.unlockBadge(state.authUser.id, badgeId).catch(() => null)));
+      const availableBadges = new Set(state.badges.map((badge) => badge.id));
+      const toUnlock = new Set();
+      if (latestCheckins.length >= 1) toUnlock.add('emergency-landing');
+      if (unique.size >= 5) toUnlock.add('pub-crawl-plumber');
+      if (unique.size >= 10) toUnlock.add('golden-flush');
+      if (extra.bathroomAdded) toUnlock.add('hidden-gem-hunter');
+
+      latestCheckins.forEach((item) => {
+        const badgeId = countryBadgeId(item.country);
+        if (badgeId) toUnlock.add(badgeId);
+      });
+
+      const outdoorCheckins = latestCheckins.filter(isOutdoorBathroom).length;
+      if (outdoorCheckins >= 1) toUnlock.add('forest-first-relief');
+      if (outdoorCheckins >= 3) toUnlock.add('forest-trail-regular');
+      if (outdoorCheckins >= 10) toUnlock.add('forest-legend');
+
+      await Promise.all([...toUnlock]
+        .filter((badgeId) => availableBadges.has(badgeId))
+        .map((badgeId) => API.unlockBadge(state.authUser.id, badgeId).catch(() => null)));
     } catch {
       // Badge unlocks are non-critical; check-in/add should not fail because of badge rules.
     }

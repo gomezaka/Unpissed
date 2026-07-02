@@ -84,11 +84,13 @@
       x: Number(row.map_x ?? hashPercent(row.id || row.name, 18, 78)),
       y: Number(row.map_y ?? hashPercent(`${row.name || row.id}-y`, 26, 76)),
       tags,
-      status: String(row.status || (row.moderation_status === 'pending' ? 'NEW' : 'OPEN')).toUpperCase(),
+      status: String(row.status || (row.moderation_status === 'unused' ? 'UNUSED' : row.moderation_status === 'pending' ? 'NEW' : 'OPEN')).toUpperCase(),
       access,
       accessMode: normalizeAccessMode(row.access_mode),
       openNow: row.is_open_now !== false,
       type: row.type || 'Other',
+      city: row.city || '',
+      country: row.country || '',
       facilities,
       photoCount: Number(row.photo_count ?? photos.length ?? 0),
       photos,
@@ -107,6 +109,10 @@
       id: row.id,
       bathroomId: row.bathroom_id,
       bathroomName: bathroom?.name || row.bathroom_name || 'Unknown bathroom',
+      bathroomType: bathroom?.type || row.bathroom_type || 'Other',
+      country: bathroom?.country || row.country || '',
+      facilities: Array.isArray(bathroom?.facilities) ? bathroom.facilities : [],
+      vibeTags: Array.isArray(bathroom?.vibe_tags) ? bathroom.vibe_tags : [],
       rating: Number(ratingRow?.overall ?? ratingFromCriteria(criteria)),
       criteria,
       comment: row.comment || '',
@@ -119,11 +125,34 @@
     return String(name || 'UP').trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'UP';
   }
 
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
+  }
+
+  function normalizeProfile(row = {}) {
+    const displayName = row.display_name || row.handle || 'Unpissed User';
+    return {
+      id: row.id,
+      displayName,
+      handle: row.handle || '',
+      city: row.city || '',
+      avatarUrl: row.avatar_url || '',
+      initials: initials(displayName),
+      createdAt: row.created_at
+    };
+  }
+
   function feedText(row = {}) {
     const payload = row.payload || {};
-    const actor = row.profiles?.display_name || 'Someone discreet';
-    const bathroom = row.bathrooms?.name || payload.bathroomName || 'a bathroom';
-    const badge = row.badges?.title || payload.badgeTitle || 'a badge';
+    const isAnonymous = row.visibility === 'friends_delayed';
+    const actor = escapeHtml(isAnonymous ? 'Someone discreet' : (row.profiles?.display_name || 'Someone discreet'));
+    const bathroom = escapeHtml(row.bathrooms?.name || payload.bathroomName || 'a bathroom');
+    const badge = escapeHtml(row.badges?.title || payload.badgeTitle || 'a badge');
     if (row.event_type === 'badge') return `<b>${actor}</b> unlocked <b class="gold-text">${badge}</b>`;
     if (row.event_type === 'bathroom_added') return `<b>${actor}</b> added <b>${bathroom}</b> to the map`;
     if (row.event_type === 'trending') return `<b>${bathroom}</b> is trending tonight`;
@@ -245,7 +274,7 @@
     if (!supabase || !userId) return [];
     const { data, error } = await supabase
       .from('checkins')
-      .select('id,bathroom_id,anonymous,comment,created_at,bathrooms(name),ratings(overall,cleanliness,queue_factor,paper_quality,lock_confidence,vibe,essentials,sound_safety)')
+      .select('id,bathroom_id,anonymous,comment,created_at,bathrooms(name,type,country,facilities,vibe_tags),ratings(overall,cleanliness,queue_factor,paper_quality,lock_confidence,vibe,essentials,sound_safety)')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(50);
@@ -283,7 +312,7 @@
     if (!supabase) return [];
     const { data, error } = await supabase
       .from('feed_events')
-      .select('id,event_type,created_at,payload,profiles!feed_events_actor_id_fkey(display_name),bathrooms(name),badges(title)')
+      .select('id,event_type,visibility,created_at,payload,profiles!feed_events_actor_id_fkey(display_name),bathrooms(name),badges(title)')
       .order('created_at', { ascending: false })
       .limit(30);
     if (error) {
@@ -303,11 +332,69 @@
     }
     return (data || []).map((row) => ({
       id: row.id,
-      initials: initials(row.profiles?.display_name),
+      initials: row.visibility === 'friends_delayed' ? 'UP' : initials(row.profiles?.display_name),
       icon: row.event_type === 'trending' ? 'trend' : '',
       html: feedText(row),
       createdAt: row.created_at
     }));
+  }
+
+  async function listProfiles(currentUserId, query = '') {
+    const supabase = getClient();
+    if (!supabase) return [];
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id,display_name,handle,avatar_url,city,created_at')
+      .order('display_name', { ascending: true })
+      .limit(100);
+    if (error) throw error;
+    const term = String(query || '').trim().toLowerCase();
+    return (data || [])
+      .map(normalizeProfile)
+      .filter((profile) => profile.id && profile.id !== currentUserId)
+      .filter((profile) => {
+        if (!term) return true;
+        return [profile.displayName, profile.handle, profile.city].join(' ').toLowerCase().includes(term);
+      })
+      .slice(0, 50);
+  }
+
+  async function listFollows(userId) {
+    const supabase = getClient();
+    if (!supabase || !userId) return [];
+    const { data, error } = await supabase
+      .from('follows')
+      .select('follower_id,following_id,created_at')
+      .or(`follower_id.eq.${userId},following_id.eq.${userId}`)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  }
+
+  async function followUser(userId, targetUserId) {
+    const supabase = getClient();
+    if (!supabase) throw new Error('Supabase is not configured.');
+    if (!userId) throw new Error('You must be signed in to add friends.');
+    if (!targetUserId || targetUserId === userId) throw new Error('Choose another user to add.');
+    const { data, error } = await supabase
+      .from('follows')
+      .upsert({ follower_id: userId, following_id: targetUserId }, { onConflict: 'follower_id,following_id' })
+      .select('*')
+      .single();
+    if (error) throw error;
+    return data;
+  }
+
+  async function unfollowUser(userId, targetUserId) {
+    const supabase = getClient();
+    if (!supabase) throw new Error('Supabase is not configured.');
+    if (!userId || !targetUserId) return;
+    const { error } = await supabase
+      .from('follows')
+      .delete()
+      .eq('follower_id', userId)
+      .eq('following_id', targetUserId);
+    if (error) throw error;
   }
 
   async function addBathroom(input = {}, userId) {
@@ -321,12 +408,13 @@
       access_mode: input.accessMode || 'unknown',
       facilities: input.facilities || [],
       city: input.city || null,
+      country: input.country || null,
       lat: input.lat ?? null,
       lng: input.lng ?? null,
       added_by: userId,
-      moderation_status: 'pending',
+      moderation_status: 'unused',
       is_open_now: true,
-      status: 'NEW',
+      status: 'UNUSED',
       vibe_tags: input.vibeTags || []
     };
     const { data, error } = await supabase
@@ -336,13 +424,14 @@
       .single();
     if (error) throw error;
 
-    await supabase.from('feed_events').insert({
+    const { error: feedError } = await supabase.from('feed_events').insert({
       actor_id: userId,
       event_type: 'bathroom_added',
       bathroom_id: data.id,
       visibility: 'public',
       payload: { bathroomName: data.name }
     });
+    if (feedError) throw feedError;
 
     return mapBathroom(data);
   }
@@ -365,11 +454,30 @@
     };
   }
 
-  async function createCheckin(input = {}, userId) {
-    const supabase = getClient();
-    if (!supabase) throw new Error('Supabase is not configured.');
-    if (!userId) throw new Error('You must be signed in to check in.');
+  function shouldUseDirectCheckinFallback(error) {
+    const message = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+    return error?.code === 'PGRST202' ||
+      (message.includes('create_checkin_with_rating') && (
+        message.includes('could not find') ||
+        message.includes('schema cache') ||
+        message.includes('function')
+      ));
+  }
 
+  function ratingFromInputCriteria(criteria = {}) {
+    const values = [
+      criteria.cleanliness,
+      criteria.queueFactor,
+      criteria.paperQuality,
+      criteria.lockConfidence,
+      criteria.vibe,
+      criteria.essentials,
+      criteria.soundSafety
+    ].map(Number).filter((value) => Number.isFinite(value) && value > 0);
+    return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+  }
+
+  async function createCheckinWithDirectInserts(supabase, input, userId) {
     const { data: checkin, error: checkinError } = await supabase
       .from('checkins')
       .insert({
@@ -399,6 +507,45 @@
       });
     if (ratingError) throw ratingError;
 
+    await supabase.from('feed_events').insert({
+      actor_id: userId,
+      event_type: 'checkin',
+      bathroom_id: input.bathroomId,
+      checkin_id: checkin.id,
+      visibility: input.anonymous ? 'friends_delayed' : 'friends',
+      payload: {
+        bathroomName: input.bathroomName,
+        rating: input.rating ?? ratingFromInputCriteria(criteria)
+      }
+    });
+
+    return checkin;
+  }
+
+  async function createCheckin(input = {}, userId) {
+    const supabase = getClient();
+    if (!supabase) throw new Error('Supabase is not configured.');
+    if (!userId) throw new Error('You must be signed in to check in.');
+
+    const criteria = input.criteria || {};
+    const { data: rpcCheckin, error: checkinError } = await supabase.rpc('create_checkin_with_rating', {
+      p_bathroom_id: input.bathroomId,
+      p_anonymous: Boolean(input.anonymous),
+      p_comment: input.comment || '',
+      p_cleanliness: criteria.cleanliness,
+      p_queue_factor: criteria.queueFactor,
+      p_paper_quality: criteria.paperQuality,
+      p_lock_confidence: criteria.lockConfidence,
+      p_vibe: criteria.vibe,
+      p_essentials: criteria.essentials,
+      p_sound_safety: criteria.soundSafety
+    });
+    if (checkinError && !shouldUseDirectCheckinFallback(checkinError)) throw checkinError;
+
+    const checkin = checkinError
+      ? await createCheckinWithDirectInserts(supabase, input, userId)
+      : rpcCheckin;
+
     if (input.photo) {
       const uploaded = await uploadPhoto(input.photo, userId, checkin.id);
       if (uploaded) {
@@ -414,18 +561,6 @@
         if (photoError) throw photoError;
       }
     }
-
-    await supabase.from('feed_events').insert({
-      actor_id: userId,
-      event_type: 'checkin',
-      bathroom_id: input.bathroomId,
-      checkin_id: checkin.id,
-      visibility: input.anonymous ? 'friends_delayed' : 'friends',
-      payload: {
-        bathroomName: input.bathroomName,
-        rating: input.rating
-      }
-    });
 
     return checkin;
   }
@@ -456,6 +591,10 @@
     listMyCheckins,
     listReviews,
     listFeedEvents,
+    listProfiles,
+    listFollows,
+    followUser,
+    unfollowUser,
     addBathroom,
     createCheckin,
     reportPrivacyIssue

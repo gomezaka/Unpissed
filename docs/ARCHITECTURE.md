@@ -1,12 +1,12 @@
-# Unpissed architecture v0.5
+# Unpissed architecture v0.6.1
 
 ```text
 GitHub
-  ↓
+  |
 Netlify
-  ↓
+  |
 Static PWA frontend
-  ↓
+  |
 Supabase
   - Auth
   - Postgres
@@ -23,6 +23,10 @@ Removed from v0.5:
 - fake bathroom fallback
 - fake feed/reviews/friends
 - static `js/data.js`
+
+Retained Netlify function:
+
+- `/.netlify/functions/health` for deployment health checks only
 
 ## Frontend files
 
@@ -41,6 +45,7 @@ Removed from v0.5:
 - `photos`
 - `badges`
 - `user_badges`
+- `follows`
 - `feed_events`
 - `reports`
 
@@ -48,7 +53,8 @@ Removed from v0.5:
 
 ```text
 Open app
-  → Load Supabase session
-  → Load public bathrooms/feed/badges
-  → Signed-in users can add bathrooms, check in, upload photos and report privacy issues
+  -> Load Supabase session
+  -> Load approved and unused bathrooms, visible feed events, badges and friend graph
+  -> Signed-in users can add bathrooms, follow people, check in, upload photos and report privacy issues
+  -> Check-ins use the create_checkin_with_rating RPC so checkin/rating/feed writes commit together
 ```

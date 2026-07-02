@@ -5,6 +5,6 @@ exports.handler = async function handler() {
       'Content-Type': 'application/json',
       'Cache-Control': 'no-store'
     },
-    body: JSON.stringify({ ok: true, app: 'unpissed', version: '0.5.0' })
+    body: JSON.stringify({ ok: true, app: 'unpissed', version: '0.6.1' })
   };
 };

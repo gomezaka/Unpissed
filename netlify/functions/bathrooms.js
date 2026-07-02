@@ -13,12 +13,10 @@ exports.handler = async (event) => {
   }
 
   return {
-    statusCode: 200,
+    statusCode: 410,
     headers,
     body: JSON.stringify({
-      mode: 'scaffold',
-      message: 'Connect this function to Supabase when backend work starts.',
-      expectedTables: ['bathrooms', 'bathroom_rating_summary', 'photos']
+      error: 'Removed endpoint. The app reads bathrooms directly from Supabase with RLS.'
     })
   };
 };

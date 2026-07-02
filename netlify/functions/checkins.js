@@ -12,27 +12,11 @@ exports.handler = async (event) => {
     };
   }
 
-  let payload = {};
-  try {
-    payload = JSON.parse(event.body || '{}');
-  } catch {
-    return {
-      statusCode: 400,
-      headers,
-      body: JSON.stringify({ error: 'Invalid JSON' })
-    };
-  }
-
   return {
-    statusCode: 200,
+    statusCode: 410,
     headers,
     body: JSON.stringify({
-      mode: 'scaffold',
-      message: 'Demo accepted. Replace with Supabase insert for checkins + ratings.',
-      received: {
-        bathroomId: payload.bathroomId || null,
-        anonymous: payload.anonymous !== false
-      }
+      error: 'Removed endpoint. The app writes check-ins through the Supabase create_checkin_with_rating RPC.'
     })
   };
 };

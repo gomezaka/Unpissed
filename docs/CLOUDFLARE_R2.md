@@ -1,6 +1,6 @@
-# Cloudflare R2
+# Future note: Cloudflare R2
 
-Cloudflare R2 is not wired into v0.5.
+Cloudflare R2 is not wired into Unpissed v0.6.1.
 
 The current production path is:
 
