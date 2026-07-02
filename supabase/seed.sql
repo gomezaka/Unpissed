@@ -16,7 +16,10 @@ insert into public.badges (id, title, subtitle, description, icon) values
   ('country-finland', 'Finland Relief', 'First check-in in Finland.', 'Check in at a bathroom in Finland.', 'flag-fi'),
   ('forest-first-relief', 'Forest First Relief', 'You logged one in the wild.', 'Check in at an outdoor, forest, trail or nature bathroom.', 'forest'),
   ('forest-trail-regular', 'Trail Regular', 'Three outdoor check-ins. Rugged.', 'Check in at outdoor or forest bathrooms three times.', 'forest'),
-  ('forest-legend', 'Forest Legend', 'Ten outdoor check-ins. Mythic logistics.', 'Check in at outdoor or forest bathrooms ten times.', 'forest')
+  ('forest-legend', 'Forest Legend', 'Ten outdoor check-ins. Mythic logistics.', 'Check in at outdoor or forest bathrooms ten times.', 'forest'),
+  ('challenge-first-to-fold', 'First to Fold', 'The body made a persuasive argument.', 'Be the first person to check in during a challenge.', 'flag'),
+  ('challenge-last-throne-standing', 'Last Throne Standing', 'Calm under social pressure.', 'Be the final person to check in during a challenge with friends.', 'crown'),
+  ('challenge-bladder-royale', 'Bladder Royale', 'You entered the arena. Sensibly.', 'Complete any friend challenge check-in.', 'pulse')
 on conflict (id) do update set
   title = excluded.title,
   subtitle = excluded.subtitle,

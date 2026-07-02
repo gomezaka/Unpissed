@@ -210,6 +210,15 @@
       return this;
     }
 
+    in(column, values = []) {
+      const encoded = values
+        .filter((value) => value !== null && value !== undefined && value !== '')
+        .map((value) => `"${String(value).replaceAll('"', '\\"')}"`)
+        .join(',');
+      this.params.set(column, `in.(${encoded})`);
+      return this;
+    }
+
     not(column, operator, value) {
       this.params.set(column, `not.${operator}.${encodeFilterValue(value)}`);
       return this;
@@ -232,6 +241,13 @@
       this.body = payload;
       this.headers.Prefer = 'resolution=merge-duplicates,return=representation';
       if (options.onConflict) this.params.set('on_conflict', options.onConflict);
+      return this;
+    }
+
+    update(payload) {
+      this.method = 'PATCH';
+      this.body = payload;
+      this.headers.Prefer = 'return=representation';
       return this;
     }
 
@@ -552,6 +568,79 @@
     };
   }
 
+  function relatedRow(value) {
+    return Array.isArray(value) ? value[0] : value;
+  }
+
+  function isMissingRelationError(error) {
+    const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+    return text.includes('pgrst205') ||
+      text.includes('pgrst200') ||
+      text.includes('42p01') ||
+      text.includes('challenge_sessions') ||
+      text.includes('challenge_participants') ||
+      text.includes('challenge_events');
+  }
+
+  function challengeModeLabel(mode) {
+    return mode === 'first_to_go' ? 'First to Go' : 'Last Throne Standing';
+  }
+
+  function normalizeChallengeParticipant(row = {}) {
+    const profile = relatedRow(row.profiles);
+    const bathroom = relatedRow(row.bathrooms);
+    const displayName = profile?.display_name || profile?.handle || 'Unpissed User';
+    return {
+      sessionId: row.session_id,
+      userId: row.user_id,
+      status: row.status || 'standing',
+      joinedAt: row.joined_at,
+      goneAt: row.first_gone_at,
+      checkinId: row.first_checkin_id,
+      bathroomId: row.first_bathroom_id,
+      bathroomName: bathroom?.name || '',
+      displayName,
+      handle: profile?.handle || '',
+      city: profile?.city || '',
+      initials: initials(displayName)
+    };
+  }
+
+  function normalizeChallenge(row = {}, participants = [], currentUserId = '') {
+    const creator = relatedRow(row.profiles);
+    const sessionParticipants = participants
+      .filter((participant) => participant.sessionId === row.id)
+      .sort((a, b) => {
+        if (a.status === 'left' && b.status !== 'left') return 1;
+        if (b.status === 'left' && a.status !== 'left') return -1;
+        if (a.goneAt && b.goneAt) return new Date(a.goneAt) - new Date(b.goneAt);
+        if (a.goneAt) return -1;
+        if (b.goneAt) return 1;
+        return new Date(a.joinedAt || 0) - new Date(b.joinedAt || 0);
+      });
+    const activeParticipants = sessionParticipants.filter((participant) => participant.status !== 'left');
+    const goneParticipants = activeParticipants.filter((participant) => participant.status === 'gone' && participant.goneAt);
+    const standingParticipants = activeParticipants.filter((participant) => participant.status === 'standing');
+    return {
+      id: row.id,
+      title: row.title || challengeModeLabel(row.mode),
+      mode: row.mode || 'last_throne_standing',
+      modeLabel: challengeModeLabel(row.mode),
+      status: row.status || 'active',
+      visibility: row.visibility || 'friends',
+      createdBy: row.created_by,
+      creatorName: creator?.display_name || 'Unpissed User',
+      startedAt: row.started_at || row.created_at,
+      endedAt: row.ended_at,
+      createdAt: row.created_at,
+      participants: sessionParticipants,
+      activeParticipants,
+      goneParticipants,
+      standingParticipants,
+      currentParticipant: sessionParticipants.find((participant) => participant.userId === currentUserId) || null
+    };
+  }
+
   function feedText(row = {}) {
     const payload = row.payload || {};
     const isAnonymous = row.visibility === 'friends_delayed';
@@ -817,6 +906,168 @@
     return data || [];
   }
 
+  async function listChallenges(currentUserId) {
+    const supabase = getClient();
+    if (!supabase || !currentUserId) return [];
+    try {
+      const { data: sessions, error: sessionsError } = await supabase
+        .from('challenge_sessions')
+        .select('*,profiles!challenge_sessions_created_by_fkey(display_name,handle,city)')
+        .order('created_at', { ascending: false })
+        .limit(30);
+      if (sessionsError) throw sessionsError;
+
+      const sessionIds = (sessions || []).map((row) => row.id).filter(Boolean);
+      if (!sessionIds.length) return [];
+
+      let participantRows = [];
+      const { data: participants, error: participantsError } = await supabase
+        .from('challenge_participants')
+        .select('*,profiles!challenge_participants_user_id_fkey(display_name,handle,city),bathrooms!challenge_participants_first_bathroom_id_fkey(name)')
+        .in('session_id', sessionIds)
+        .order('joined_at', { ascending: true });
+      if (participantsError) {
+        const fallback = await supabase
+          .from('challenge_participants')
+          .select('*')
+          .in('session_id', sessionIds)
+          .order('joined_at', { ascending: true });
+        if (fallback.error) throw fallback.error;
+        participantRows = fallback.data || [];
+      } else {
+        participantRows = participants || [];
+      }
+
+      const normalizedParticipants = participantRows.map(normalizeChallengeParticipant);
+      return (sessions || []).map((session) => normalizeChallenge(session, normalizedParticipants, currentUserId));
+    } catch (error) {
+      if (isMissingRelationError(error)) return [];
+      throw error;
+    }
+  }
+
+  async function createChallenge(input = {}, userId) {
+    const supabase = getClient();
+    if (!supabase) throw new Error('Supabase is not configured.');
+    if (!userId) throw new Error('You must be signed in to start a challenge.');
+    const mode = input.mode === 'first_to_go' ? 'first_to_go' : 'last_throne_standing';
+    const title = input.title || challengeModeLabel(mode);
+    const { data, error } = await supabase
+      .from('challenge_sessions')
+      .insert({
+        title,
+        mode,
+        status: 'active',
+        visibility: 'friends',
+        created_by: userId
+      })
+      .select('*')
+      .single();
+    if (error) throw error;
+    await joinChallenge(data.id, userId);
+    return data;
+  }
+
+  async function joinChallenge(sessionId, userId) {
+    const supabase = getClient();
+    if (!supabase) throw new Error('Supabase is not configured.');
+    if (!userId) throw new Error('You must be signed in to join a challenge.');
+    if (!sessionId) throw new Error('Choose a challenge.');
+    const { data, error } = await supabase
+      .from('challenge_participants')
+      .upsert({
+        session_id: sessionId,
+        user_id: userId,
+        status: 'standing',
+        first_gone_at: null,
+        first_checkin_id: null,
+        first_bathroom_id: null
+      }, { onConflict: 'session_id,user_id' })
+      .select('*')
+      .single();
+    if (error) throw error;
+    await supabase.from('challenge_events').insert({
+      session_id: sessionId,
+      user_id: userId,
+      event_type: 'joined'
+    });
+    return data;
+  }
+
+  async function leaveChallenge(sessionId, userId) {
+    const supabase = getClient();
+    if (!supabase) throw new Error('Supabase is not configured.');
+    if (!sessionId || !userId) return null;
+    const { data, error } = await supabase
+      .from('challenge_participants')
+      .update({ status: 'left' })
+      .eq('session_id', sessionId)
+      .eq('user_id', userId)
+      .select('*');
+    if (error) throw error;
+    await supabase.from('challenge_events').insert({
+      session_id: sessionId,
+      user_id: userId,
+      event_type: 'left'
+    });
+    return Array.isArray(data) ? data[0] : data;
+  }
+
+  async function finishChallenge(sessionId, userId) {
+    const supabase = getClient();
+    if (!supabase) throw new Error('Supabase is not configured.');
+    if (!sessionId || !userId) return null;
+    const { data, error } = await supabase
+      .from('challenge_sessions')
+      .update({ status: 'finished', ended_at: new Date().toISOString() })
+      .eq('id', sessionId)
+      .eq('created_by', userId)
+      .select('*');
+    if (error) throw error;
+    await supabase.from('challenge_events').insert({
+      session_id: sessionId,
+      user_id: userId,
+      event_type: 'finished'
+    });
+    return Array.isArray(data) ? data[0] : data;
+  }
+
+  async function recordChallengeCheckin(input = {}, userId) {
+    const supabase = getClient();
+    if (!supabase) throw new Error('Supabase is not configured.');
+    if (!userId) throw new Error('You must be signed in to update a challenge.');
+    const sessionId = input.sessionId;
+    if (!sessionId || !input.checkinId) return null;
+    const goneAt = new Date().toISOString();
+    const { data, error } = await supabase
+      .from('challenge_participants')
+      .update({
+        status: 'gone',
+        first_gone_at: goneAt,
+        first_checkin_id: input.checkinId,
+        first_bathroom_id: input.bathroomId || null
+      })
+      .eq('session_id', sessionId)
+      .eq('user_id', userId)
+      .eq('status', 'standing')
+      .select('*');
+    if (error) throw error;
+    const participant = Array.isArray(data) ? data[0] : data;
+    if (!participant) return null;
+    await supabase.from('challenge_events').insert({
+      session_id: sessionId,
+      user_id: userId,
+      event_type: 'checkin',
+      checkin_id: input.checkinId,
+      bathroom_id: input.bathroomId || null,
+      payload: {
+        bathroomName: input.bathroomName || '',
+        goneAt
+      }
+    });
+    return participant;
+  }
+
   async function followUser(userId, targetUserId) {
     const supabase = getClient();
     if (!supabase) throw new Error('Supabase is not configured.');
@@ -1042,6 +1293,12 @@
     listFeedEvents,
     listProfiles,
     listFollows,
+    listChallenges,
+    createChallenge,
+    joinChallenge,
+    leaveChallenge,
+    finishChallenge,
+    recordChallengeCheckin,
     followUser,
     unfollowUser,
     addBathroom,

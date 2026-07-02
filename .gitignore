@@ -1,2 +1,5 @@
 tools/data/
 tools/output/
+.env
+.env.local
+coordinate-backups/

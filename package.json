@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "npx serve .",
     "geo:seeds": "node tools/geocode_seed_locations.mjs",
-    "check": "node --check js/app.js && node --check js/config.js && node --check js/config.example.js && node --check js/vendor-fallback.js && node --check js/supabase-api.js && node --check netlify/functions/health.js && node --check tools/geocode_seed_locations.mjs"
+    "moderator": "node scripts/moderator-server.mjs --open",
+    "moderator:server": "node scripts/moderator-server.mjs",
+    "coordinates:dry-run": "node scripts/fix-coordinates.mjs",
+    "coordinates:fix": "node scripts/fix-coordinates.mjs --apply",
+    "check": "node --check js/app.js && node --check js/config.js && node --check js/config.example.js && node --check js/vendor-fallback.js && node --check js/supabase-api.js && node --check netlify/functions/health.js && node --check tools/geocode_seed_locations.mjs && node --check scripts/admin-lib.mjs && node --check scripts/moderator-server.mjs && node --check scripts/fix-coordinates.mjs"
   },
   "keywords": [
     "pwa",

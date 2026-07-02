@@ -3,13 +3,14 @@
 Use this order when rebuilding or refreshing the Supabase data model.
 
 1. Run `schema.sql`.
-2. Run `seed.sql` for the badge catalog.
-3. If bad imported venue coordinates already exist, run `reset_unverified_seed_bathrooms_for_location_qa.sql`.
+2. If you are updating an existing database and do not want to rerun the full schema, run `challenges.sql`.
+3. Run `seed.sql` for the badge catalog.
+4. If bad imported venue coordinates already exist, run `reset_unverified_seed_bathrooms_for_location_qa.sql`.
    - This copies unverified/imported venue seeds into `location_qa_candidates`.
    - It deletes those seed rows from `bathrooms`.
    - It does not delete approved rows or user-added rows.
    - If the scraper later says `PGRST205` / table not found, run `notify pgrst, 'reload schema';` in Supabase SQL Editor and retry.
-4. Run the automated location scraper from the repo root.
+5. Run the automated location scraper from the repo root.
 
    Recommended bulk mode is local Geofabrik data. It needs `osmium` on PATH for the first index build:
 
@@ -32,15 +33,15 @@ Use this order when rebuilding or refreshing the Supabase data model.
    - Writes reviewable files under `tools/output/`.
    - Does not write to Supabase directly.
 
-5. Review and run `tools/output/location_qa_autofix.sql` in Supabase SQL Editor.
+6. Review and run `tools/output/location_qa_autofix.sql` in Supabase SQL Editor.
    - This inserts only high-confidence matches.
    - It uses `moderation_status = 'unused'` and `status = 'UNUSED'`.
    - It will not overwrite approved or user-added bathroom rows on conflict.
-6. Open `tools/output/location_qa_review.csv` for low-confidence/no-match rows.
+7. Open `tools/output/location_qa_review.csv` for low-confidence/no-match rows.
    - Use `http://localhost:8080/tools/location_qa.html` only for rows that need manual review.
    - Run generated SQL for manually accepted rows.
-7. Run `fix_visible_unused_bathrooms.sql`.
-8. Run `debug_bathroom_visibility.sql` and check the result.
+8. Run `fix_visible_unused_bathrooms.sql`.
+9. Run `debug_bathroom_visibility.sql` and check the result.
 
 Useful scraper commands:
 
@@ -69,6 +70,7 @@ Important app behavior:
 - Nearby must use real device location only.
 - SQL must not create fallback location behavior.
 - Rows without `lat`/`lng` can be listed/searchable, but they cannot be mapped or routed until coordinates are verified.
+- Friend challenges require `challenge_sessions`, `challenge_participants` and `challenge_events`; run `challenges.sql` on existing databases.
 
 After `debug_bathroom_visibility.sql`, these are healthy signs:
 

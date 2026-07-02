@@ -106,6 +106,9 @@
     feed: [],
     profiles: [],
     follows: [],
+    challenges: [],
+    challengeSubmitting: false,
+    challengeError: '',
     friendQuery: '',
     selectedProfileId: null,
     profileDetailsById: {},
@@ -348,6 +351,7 @@
       star: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2Z"></path></svg>',
       route: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 19a3 3 0 1 1 0-6c3 0 5 3 8 3a4 4 0 0 0 0-8"></path><circle cx="18" cy="5" r="2"></circle><circle cx="6" cy="19" r="2"></circle></svg>',
       flag: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21V4"></path><path d="M5 4h12l-1 5 1 5H5"></path></svg>',
+      crown: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m2 6 5 12h10l5-12-6 5-4-7-4 7-6-5Z"></path><path d="M7 22h10"></path></svg>',
       forest: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 7 8h-4l3 5h-4v5h-4v-5H6l3-5H5l7-8Z"></path></svg>',
       camera: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 4.5 16 7h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h3l1.5-2.5h5Z"></path><circle cx="12" cy="13" r="3"></circle></svg>',
       filter: '<svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"></path></svg>',
@@ -653,6 +657,62 @@
     return 'Add';
   }
 
+  function challengeModeMeta(mode) {
+    if (mode === 'first_to_go') {
+      return {
+        title: 'First to Go',
+        kicker: 'Who cracks first?',
+        subtitle: 'The first check-in gets the early-exit crown. Zero shame, maximum evidence.',
+        iconName: 'flag'
+      };
+    }
+    return {
+      title: 'Last Throne Standing',
+      kicker: 'How long can you hold it?',
+      subtitle: 'Last friend to check in wins. Don\'t suffer for glory.',
+      iconName: 'crown'
+    };
+  }
+
+  function challengeList() {
+    return Array.isArray(state.challenges) ? state.challenges : [];
+  }
+
+  function activeChallengesForUser() {
+    return challengeList().filter((challenge) =>
+      challenge.status === 'active' &&
+      challenge.currentParticipant &&
+      challenge.currentParticipant.status === 'standing'
+    );
+  }
+
+  function joinedChallengeCount() {
+    return challengeList().filter((challenge) =>
+      challenge.currentParticipant &&
+      challenge.currentParticipant.status !== 'left'
+    ).length;
+  }
+
+  function challengeWinner(challenge) {
+    const gone = challenge.goneParticipants || [];
+    if (!gone.length) return null;
+    if (challenge.mode === 'first_to_go') return gone[0];
+    if (challenge.status !== 'finished' && (challenge.standingParticipants || []).length) return null;
+    return gone[gone.length - 1];
+  }
+
+  function challengeStatusText(challenge) {
+    if (challenge.status === 'finished') {
+      const winner = challengeWinner(challenge);
+      return winner ? `${winner.displayName} won` : 'Finished without a bathroom event';
+    }
+    const current = challenge.currentParticipant;
+    if (!current) return 'Open for friends';
+    if (current.status === 'gone') return 'You went. History noticed.';
+    if (current.status === 'left') return 'You left this round.';
+    return 'You are still standing';
+  }
+
   function timeAgo(value) {
     if (!value) return '';
     const date = new Date(value);
@@ -736,6 +796,7 @@
     switch (state.activeTab) {
       case 'friends':
       case 'feed': return renderFriendsPage();
+      case 'challenges': return renderChallengesPage();
       case 'checkin': return renderCheckinPage();
       case 'badges': return renderBadgesPage();
       case 'profile': return renderProfilePage();
@@ -1190,6 +1251,155 @@
     `;
   }
 
+  function renderChallengeTeaser() {
+    const active = challengeList().filter((challenge) => challenge.status === 'active');
+    const standing = activeChallengesForUser().length;
+    return `
+      <article class="simple-card challenge-teaser">
+        <div class="challenge-teaser__icon">${icon('crown')}</div>
+        <div>
+          <div class="card-kicker">Friend challenges</div>
+          <h3>${standing ? 'You are still standing' : 'Start a bathroom dare'}</h3>
+          <p>${standing
+            ? `${standing} active round${standing === 1 ? '' : 's'} waiting for your next check-in.`
+            : 'Last Throne Standing, First to Go, and the kind of logistics nobody admits planning.'}</p>
+        </div>
+        <button class="secondary-button" data-tab="challenges">Open</button>
+      </article>
+    `;
+  }
+
+  function renderChallengeModeButton(mode) {
+    const meta = challengeModeMeta(mode);
+    return `
+      <button class="challenge-mode-button" data-action="create-challenge" data-mode="${escapeHtml(mode)}" ${state.challengeSubmitting ? 'disabled' : ''}>
+        <span>${icon(meta.iconName)}</span>
+        <b>${escapeHtml(meta.title)}</b>
+        <small>${escapeHtml(meta.subtitle)}</small>
+      </button>
+    `;
+  }
+
+  function renderChallengeParticipantPills(challenge) {
+    const participants = challenge.activeParticipants || [];
+    if (!participants.length) return '<div class="empty-state">No one has joined yet.</div>';
+    return `
+      <div class="challenge-participants">
+        ${participants.map((participant, index) => {
+          const isGone = participant.status === 'gone';
+          const place = isGone ? `${index + 1}` : '';
+          return `
+            <span class="challenge-participant ${isGone ? 'is-gone' : 'is-standing'}">
+              <b>${escapeHtml(participant.displayName)}</b>
+              <small>${isGone ? `${place}. ${participant.bathroomName || 'checked in'} · ${timeAgo(participant.goneAt)}` : 'Still standing'}</small>
+            </span>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  function renderChallengeCard(challenge) {
+    const meta = challengeModeMeta(challenge.mode);
+    const isCreator = challenge.createdBy === state.authUser?.id;
+    const current = challenge.currentParticipant;
+    const joined = current && current.status !== 'left';
+    const standing = current?.status === 'standing';
+    const finished = challenge.status === 'finished';
+    const winner = challengeWinner(challenge);
+    const activeCount = challenge.activeParticipants?.length || 0;
+    const goneCount = challenge.goneParticipants?.length || 0;
+    const standingCount = challenge.standingParticipants?.length || 0;
+    return `
+      <article class="challenge-card ${finished ? 'is-finished' : ''}">
+        <div class="challenge-card__top">
+          <div class="challenge-card__icon">${icon(meta.iconName)}</div>
+          <div>
+            <div class="card-kicker">${escapeHtml(meta.kicker)}</div>
+            <h3>${escapeHtml(challenge.title || meta.title)}</h3>
+            <p>${escapeHtml(challengeStatusText(challenge))}</p>
+          </div>
+        </div>
+        <div class="challenge-scoreboard">
+          <div><b>${activeCount}</b><span>Players</span></div>
+          <div><b>${standingCount}</b><span>Standing</span></div>
+          <div><b>${goneCount}</b><span>Gone</span></div>
+        </div>
+        ${winner ? `
+          <div class="challenge-winner">
+            ${icon(challenge.mode === 'first_to_go' ? 'flag' : 'crown')}
+            <span>${escapeHtml(winner.displayName)} · ${escapeHtml(challenge.mode === 'first_to_go' ? 'First to Go' : 'Last Throne Standing')}</span>
+          </div>
+        ` : ''}
+        ${renderChallengeParticipantPills(challenge)}
+        <div class="challenge-actions">
+          ${!finished && !joined ? `<button class="primary-button" data-action="join-challenge" data-challenge-id="${escapeHtml(challenge.id)}" ${state.challengeSubmitting ? 'disabled' : ''}>Join</button>` : ''}
+          ${!finished && joined && standing ? `<button class="secondary-button" data-action="leave-challenge" data-challenge-id="${escapeHtml(challenge.id)}" ${state.challengeSubmitting ? 'disabled' : ''}>Leave</button>` : ''}
+          ${!finished && joined && !standing ? `<button class="secondary-button" data-tab="checkin">Checked in</button>` : ''}
+          ${!finished && isCreator ? `<button class="ghost-button" data-action="finish-challenge" data-challenge-id="${escapeHtml(challenge.id)}" ${state.challengeSubmitting ? 'disabled' : ''}>Finish</button>` : ''}
+        </div>
+      </article>
+    `;
+  }
+
+  function renderChallengesPage() {
+    const signedIn = Boolean(state.authUser);
+    const active = challengeList().filter((challenge) => challenge.status === 'active');
+    const finished = challengeList().filter((challenge) => challenge.status === 'finished').slice(0, 6);
+    const standing = activeChallengesForUser();
+
+    if (!signedIn) {
+      return `
+        <section class="content-page">
+          <h2 class="page-title">Challenges</h2>
+          <p class="page-subtitle">Bathroom games are a friend feature. Sign in first.</p>
+          <article class="simple-card challenge-teaser">
+            <div class="challenge-teaser__icon">${icon('crown')}</div>
+            <div>
+              <h3>Last Throne Standing</h3>
+              <p>Play with friends when you are out. The app tracks check-ins, not suffering.</p>
+            </div>
+          </article>
+          <button class="primary-button full-width" data-action="open-auth">Sign in</button>
+        </section>
+      `;
+    }
+
+    return `
+      <section class="content-page">
+        <h2 class="page-title">Challenges</h2>
+        <p class="page-subtitle">Play with friends. Check in when nature wins. Don't suffer for glory.</p>
+        ${state.challengeError ? `<div class="auth-error" role="alert">${escapeHtml(state.challengeError)}</div>` : ''}
+        <div class="challenge-mode-grid">
+          ${renderChallengeModeButton('last_throne_standing')}
+          ${renderChallengeModeButton('first_to_go')}
+        </div>
+        ${standing.length ? `
+          <article class="simple-card challenge-active-note">
+            <div class="card-kicker">Active now</div>
+            <h3>Your next check-in counts</h3>
+            <p>${standing.map((challenge) => challenge.title).join(', ')}</p>
+          </article>
+        ` : ''}
+        <div class="section-row">
+          <h2 class="section-title">Live rounds</h2>
+          <span class="section-meta">${active.length}</span>
+        </div>
+        <div class="challenge-list">
+          ${active.length ? active.map(renderChallengeCard).join('') : '<div class="empty-state">No live challenges yet. Start one before the first drink becomes a tactical mistake.</div>'}
+        </div>
+        ${finished.length ? `
+          <div class="section-row">
+            <h2 class="section-title">Recent glory</h2>
+          </div>
+          <div class="challenge-list">
+            ${finished.map(renderChallengeCard).join('')}
+          </div>
+        ` : ''}
+      </section>
+    `;
+  }
+
   function renderFriendsPage() {
     const sets = followSets();
     const people = filteredProfilesForFriends(sets);
@@ -1207,14 +1417,16 @@
           <p class="page-subtitle">Sign in to add people and see mutual friend status.</p>
           <article class="simple-card friend-radar">
             <div class="card-kicker">Private by default</div>
-            <p class="privacy-note">Anonymous check-ins stay anonymous. Friend activity uses delayed, non-exact sharing.</p>
-            <div class="friend-card-actions">
-              <button class="primary-button full-width" data-action="open-auth">Sign in</button>
-            </div>
-          </article>
-          <div class="section-row">
-            <h2 class="section-title">Activity</h2>
+          <p class="privacy-note">Anonymous check-ins stay anonymous. Friend activity uses delayed, non-exact sharing.</p>
+          <div class="friend-card-actions">
+            <button class="primary-button full-width" data-action="open-auth">Sign in</button>
           </div>
+        </article>
+        <div style="height:12px"></div>
+        ${renderChallengeTeaser()}
+        <div class="section-row">
+          <h2 class="section-title">Activity</h2>
+        </div>
           ${renderActivityCard(state.feed)}
         </section>
       `;
@@ -1230,6 +1442,8 @@
           <div class="stat-card"><b>${followerCount}</b><span>Followers</span></div>
           <div class="stat-card"><b>${peopleCount}</b><span>People</span></div>
         </div>
+        ${renderChallengeTeaser()}
+        <div style="height:12px"></div>
         ${requests.length ? `
           <div class="section-row section-row--tight">
             <h2 class="section-title">Friend requests</h2>
@@ -1744,7 +1958,7 @@
     const viewingOwn = profileId === state.authUser?.id;
     const visibleCheckins = (details.checkins || []).filter((item) => viewingOwn || !item.anonymous).slice(0, 6);
     if (!visibleCheckins.length) {
-      return '<div class="empty-state">No visible do visits yet.</div>';
+      return '<div class="empty-state">No visible toilet visits yet.</div>';
     }
     return `
       <div class="history-list public-history-list">
@@ -1780,7 +1994,7 @@
           </div>
         </div>
         <div class="stats-grid stats-grid--compact">
-          <div class="stat-card"><b>${loading ? '...' : stats.checkins}</b><span>Do visits</span></div>
+          <div class="stat-card"><b>${loading ? '...' : stats.checkins}</b><span>Toilet visits</span></div>
           <div class="stat-card"><b>${loading ? '...' : stats.uniqueBathrooms}</b><span>Unique toilets</span></div>
           <div class="stat-card"><b>${loading ? '...' : stats.badges}</b><span>Badges</span></div>
           <div class="stat-card"><b>${loading ? '...' : (stats.averageRating ? rounded(stats.averageRating) : '-')}</b><span>Avg relief</span></div>
@@ -1797,7 +2011,7 @@
       </div>
       ${loading ? '<div class="empty-state">Loading badges...</div>' : renderProfileBadgePills(details)}
       <div class="section-row section-row--tight">
-        <h2 class="section-title">Recent do visits</h2>
+        <h2 class="section-title">Recent toilet visits</h2>
       </div>
       ${loading ? '<div class="empty-state">Loading visits...</div>' : renderProfileVisitList(profileId, details)}
     `;
@@ -1955,6 +2169,18 @@
         break;
       case 'toggle-friend':
         await toggleFriend(element.dataset.userId);
+        break;
+      case 'create-challenge':
+        await createChallenge(element.dataset.mode);
+        break;
+      case 'join-challenge':
+        await joinChallenge(element.dataset.challengeId);
+        break;
+      case 'leave-challenge':
+        await leaveChallenge(element.dataset.challengeId);
+        break;
+      case 'finish-challenge':
+        await finishChallenge(element.dataset.challengeId);
         break;
       case 'report-privacy':
         await reportPrivacyIssue();
@@ -2511,14 +2737,15 @@
       return;
     }
     try {
-      const [remoteBathrooms, badges, feed, checkins, userBadges, profiles, follows] = await withTimeout(Promise.all([
+      const [remoteBathrooms, badges, feed, checkins, userBadges, profiles, follows, challenges] = await withTimeout(Promise.all([
         API.listBathrooms(),
         API.listBadges(),
         API.listFeedEvents(),
         state.authUser ? API.listMyCheckins(state.authUser.id) : Promise.resolve([]),
         state.authUser ? API.listUserBadges(state.authUser.id) : Promise.resolve([]),
         state.authUser ? API.listProfiles(state.authUser.id) : Promise.resolve([]),
-        state.authUser ? API.listFollows(state.authUser.id) : Promise.resolve([])
+        state.authUser ? API.listFollows(state.authUser.id) : Promise.resolve([]),
+        state.authUser && API.listChallenges ? API.listChallenges(state.authUser.id) : Promise.resolve([])
       ]), STARTUP_TIMEOUT_MS, 'Supabase sync');
       const selectedStillExists = remoteBathrooms.some((item) => item.id === state.selectedBathroomId);
       const routeStillExists = remoteBathrooms.some((item) => item.id === state.routeBathroomId);
@@ -2531,6 +2758,7 @@
         userBadges,
         profiles,
         follows,
+        challenges,
         loading: false,
         backendStatus: state.authUser ? 'live' : 'ready',
         selectedBathroomId: selectedStillExists ? state.selectedBathroomId : null,
@@ -2566,6 +2794,9 @@
         userBadges: [],
         profiles: [],
         follows: [],
+        challenges: [],
+        challengeSubmitting: false,
+        challengeError: '',
         friendQuery: '',
         backendStatus: 'ready',
         syncMessage: 'Signed out. Public Supabase data remains visible.',
@@ -2696,6 +2927,122 @@
     } catch (error) {
       toast('Friend update failed', error.message);
     }
+  }
+
+  async function refreshChallenges(options = {}) {
+    if (!state.authUser || !API?.listChallenges) {
+      state = { ...state, challenges: [], challengeSubmitting: false };
+      render();
+      return;
+    }
+    try {
+      const challenges = await API.listChallenges(state.authUser.id);
+      state = { ...state, challenges, challengeSubmitting: false, challengeError: '' };
+      render();
+      if (!options.silent) toast('Challenges synced', `${challenges.length} rounds loaded.`);
+    } catch (error) {
+      state = { ...state, challengeSubmitting: false, challengeError: errorMessage(error, 'Challenges could not be loaded.') };
+      render();
+      if (!options.silent) toast('Challenge sync failed', errorMessage(error));
+    }
+  }
+
+  async function createChallenge(mode = 'last_throne_standing') {
+    if (!state.authUser) {
+      toast('Sign in required', 'Challenges need friends and a Supabase account.');
+      setState({ modal: 'auth' });
+      return;
+    }
+    const meta = challengeModeMeta(mode);
+    state = { ...state, challengeSubmitting: true, challengeError: '' };
+    render();
+    try {
+      await API.createChallenge({ mode, title: meta.title }, state.authUser.id);
+      toast('Challenge started', `${meta.title} is live for your friends.`);
+      await refreshChallenges({ silent: true });
+    } catch (error) {
+      state = { ...state, challengeSubmitting: false, challengeError: errorMessage(error, 'Challenge could not be started.') };
+      render();
+      toast('Challenge failed', errorMessage(error));
+    }
+  }
+
+  async function joinChallenge(challengeId) {
+    if (!state.authUser || !challengeId) return;
+    state = { ...state, challengeSubmitting: true, challengeError: '' };
+    render();
+    try {
+      await API.joinChallenge(challengeId, state.authUser.id);
+      toast('Joined challenge', 'Your next check-in may become evidence.');
+      await refreshChallenges({ silent: true });
+    } catch (error) {
+      state = { ...state, challengeSubmitting: false, challengeError: errorMessage(error, 'Could not join challenge.') };
+      render();
+      toast('Join failed', errorMessage(error));
+    }
+  }
+
+  async function leaveChallenge(challengeId) {
+    if (!state.authUser || !challengeId) return;
+    state = { ...state, challengeSubmitting: true, challengeError: '' };
+    render();
+    try {
+      await API.leaveChallenge(challengeId, state.authUser.id);
+      toast('Challenge left', 'No bathroom glory recorded for this round.');
+      await refreshChallenges({ silent: true });
+    } catch (error) {
+      state = { ...state, challengeSubmitting: false, challengeError: errorMessage(error, 'Could not leave challenge.') };
+      render();
+      toast('Leave failed', errorMessage(error));
+    }
+  }
+
+  async function finishChallenge(challengeId) {
+    if (!state.authUser || !challengeId) return;
+    state = { ...state, challengeSubmitting: true, challengeError: '' };
+    render();
+    try {
+      await API.finishChallenge(challengeId, state.authUser.id);
+      toast('Challenge finished', 'The bathroom scoreboard has spoken.');
+      await refreshChallenges({ silent: true });
+    } catch (error) {
+      state = { ...state, challengeSubmitting: false, challengeError: errorMessage(error, 'Could not finish challenge.') };
+      render();
+      toast('Finish failed', errorMessage(error));
+    }
+  }
+
+  async function recordChallengeCheckinIfNeeded(savedCheckin, bathroom) {
+    if (!state.authUser || !API?.recordChallengeCheckin) return [];
+    const checkinId = savedCheckin?.id || (Array.isArray(savedCheckin) ? savedCheckin[0]?.id : '');
+    if (!checkinId) return [];
+    const active = activeChallengesForUser();
+    if (!active.length) return [];
+    const recorded = [];
+    const beforeById = new Map(active.map((challenge) => [challenge.id, challenge]));
+    for (const challenge of active) {
+      const result = await API.recordChallengeCheckin({
+        sessionId: challenge.id,
+        checkinId,
+        bathroomId: bathroom?.id || null,
+        bathroomName: bathroom?.name || ''
+      }, state.authUser.id).catch(() => null);
+      if (result) recorded.push(challenge);
+    }
+    if (recorded.length) {
+      await Promise.all(recorded.map((challenge) => API.unlockBadge?.(state.authUser.id, 'challenge-bladder-royale').catch(() => null)));
+      recorded.forEach((challenge) => {
+        const before = beforeById.get(challenge.id);
+        const goneBefore = before?.goneParticipants?.length || 0;
+        const activeBefore = before?.activeParticipants?.length || 0;
+        if (goneBefore === 0) API.unlockBadge?.(state.authUser.id, 'challenge-first-to-fold').catch(() => null);
+        if (activeBefore > 1 && goneBefore === activeBefore - 1) {
+          API.unlockBadge?.(state.authUser.id, 'challenge-last-throne-standing').catch(() => null);
+        }
+      });
+      await refreshChallenges({ silent: true });
+    }
+    return recorded;
   }
 
   async function reportPrivacyIssue() {
@@ -2847,17 +3194,18 @@
     render();
 
     try {
-      await API.createCheckin({ ...checkin, photo }, state.authUser.id);
+      const savedCheckin = await API.createCheckin({ ...checkin, photo }, state.authUser.id);
+      const challengeHits = await recordChallengeCheckinIfNeeded(savedCheckin, bathroom);
       state = {
         ...state,
         modal: null,
-        activeTab: 'friends',
+        activeTab: challengeHits.length ? 'challenges' : 'friends',
         checkinSubmitting: false,
         checkinError: '',
         syncMessage: 'Check-in saved to Supabase.'
       };
       render();
-      toast('Check-in saved', 'Saved to Supabase. Your family does not need to know.');
+      toast('Check-in saved', challengeHits.length ? 'Challenge scoreboard updated.' : 'Saved to Supabase. Your family does not need to know.');
       await updateBadgeUnlocks();
       await syncSupabase({ silent: true });
     } catch (error) {

@@ -41,6 +41,62 @@ http://localhost:8080
 
 Geolocation works best on the deployed Netlify HTTPS URL. Localhost normally works for development in modern browsers.
 
+## Local moderator and coordinate repair
+
+The moderator tool is local only. It is a Node server bound to `127.0.0.1`; it is not a public admin route in the user app.
+
+Create `.env.local` in the repo root:
+
+```env
+SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY
+```
+
+Do not put the service role key in `js/config.js`, and do not use a frontend prefix such as `VITE_` for admin keys.
+
+Start the local moderator:
+
+```bash
+npm run moderator
+```
+
+Or on Windows:
+
+```bat
+start-moderator.cmd
+```
+
+Preview coordinate repairs without writing to the database:
+
+```bash
+npm run coordinates:dry-run -- --limit 10
+npm run coordinates:dry-run -- --query Sarpsborg
+```
+
+Or on Windows:
+
+```bat
+preview-coordinate-fixes.cmd --limit 10
+preview-coordinate-fixes.cmd --query Sarpsborg
+```
+
+Apply coordinate repairs only after reviewing the dry-run:
+
+```bash
+npm run coordinates:fix
+npm run coordinates:fix -- --query Sarpsborg
+```
+
+Or on Windows:
+
+```bat
+apply-coordinate-fixes.cmd --query Sarpsborg
+```
+
+The apply command creates a JSON backup in `coordinate-backups/` before updating Supabase. It only writes when `--apply` is used, and the Windows starter also requires typing `APPLY`.
+
+The `.cmd` starters always run `cd /d "%~dp0"` first, so they execute from the Unpissed repo even if the terminal was opened in the wrong folder.
+
 ## Supabase config
 
 Edit `js/config.js`:
@@ -65,14 +121,24 @@ The tile URL is configurable so you can switch from OpenStreetMap's public tile 
 Run in Supabase SQL Editor:
 
 1. `supabase/schema.sql`
-2. `supabase/seed.sql` for default badges only
-3. Any city seed files you want to import
-4. `supabase/fix_visible_unused_bathrooms.sql`
-5. `supabase/debug_bathroom_visibility.sql` to verify the result
+2. `supabase/challenges.sql` if you are updating an existing database instead of rebuilding from `schema.sql`
+3. `supabase/seed.sql` for default badges and challenge badges
+4. Any city seed files you want to import
+5. `supabase/fix_visible_unused_bathrooms.sql`
+6. `supabase/debug_bathroom_visibility.sql` to verify the result
 
 The full SQL runbook is in `supabase/RUNBOOK.md`.
 
 Existing bathrooms without coordinates still show in lists, but they will not appear as map pins until `lat` and `lng` are set.
+
+## Friend challenges
+
+Challenges are a signed-in friend feature in the app:
+
+- **Last Throne Standing**: the last participant to check in wins.
+- **First to Go**: the first participant to check in gets the early-exit title.
+
+Start and join challenges from **Friends -> Challenges**. A normal bathroom check-in automatically updates any active challenge where you are still standing.
 
 ## Testing checklist
 
