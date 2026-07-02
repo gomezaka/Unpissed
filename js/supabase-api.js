@@ -9,6 +9,7 @@
     'your_anon_or_publishable_key'
   ]);
   let client = null;
+  const REST_SESSION_KEY = `unpissed.supabase.${config.SUPABASE_URL || 'local'}.session`;
 
   function cleanValue(value) {
     return String(value || '').trim();
@@ -38,10 +39,10 @@
     }
     if (!window.supabase?.createClient) {
       return {
-        ok: false,
-        reason: 'missing-library',
-        title: 'Supabase library did not load',
-        message: 'Check the connection to the Supabase CDN, then reload the app.'
+        ok: true,
+        reason: 'rest-fallback',
+        title: 'Supabase ready',
+        message: 'Supabase CDN did not load, using built-in REST client.'
       };
     }
     return {
@@ -49,6 +50,260 @@
       reason: 'ready',
       title: 'Supabase ready',
       message: 'Supabase is configured.'
+    };
+  }
+
+  function getStoredSession() {
+    try {
+      const raw = window.localStorage?.getItem(REST_SESSION_KEY);
+      if (!raw) return null;
+      const session = JSON.parse(raw);
+      if (!session?.access_token) return null;
+      if (session.expires_at && Number(session.expires_at) * 1000 < Date.now() - 30000) {
+        window.localStorage?.removeItem(REST_SESSION_KEY);
+        return null;
+      }
+      return session;
+    } catch {
+      return null;
+    }
+  }
+
+  function setStoredSession(session) {
+    try {
+      if (!session?.access_token) {
+        window.localStorage?.removeItem(REST_SESSION_KEY);
+        return;
+      }
+      window.localStorage?.setItem(REST_SESSION_KEY, JSON.stringify(session));
+    } catch {
+      // Auth persistence is useful, but the app can continue without it.
+    }
+  }
+
+  function authHeaders(extra = {}) {
+    const session = getStoredSession();
+    return {
+      apikey: config.SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${session?.access_token || config.SUPABASE_ANON_KEY}`,
+      ...extra
+    };
+  }
+
+  function postgrestError(status, payload) {
+    const message = payload?.message || payload?.msg || `Supabase request failed with HTTP ${status}.`;
+    const error = new Error(message);
+    error.code = payload?.code || String(status);
+    error.details = payload?.details || '';
+    error.hint = payload?.hint || '';
+    error.status = status;
+    return error;
+  }
+
+  function encodeFilterValue(value) {
+    if (value === null) return 'null';
+    if (typeof value === 'boolean') return value ? 'true' : 'false';
+    return String(value);
+  }
+
+  async function readResponse(response, single = false) {
+    const text = await response.text();
+    const payload = text ? JSON.parse(text) : null;
+    if (!response.ok) return { data: null, error: postgrestError(response.status, payload) };
+    if (response.status === 204) return { data: single ? null : [], error: null };
+    return { data: payload, error: null };
+  }
+
+  class RestQuery {
+    constructor(table) {
+      this.table = table;
+      this.method = 'GET';
+      this.params = new URLSearchParams();
+      this.headers = {};
+      this.body = undefined;
+      this.singleRow = false;
+      this.rangeValue = null;
+      this.orderValues = [];
+    }
+
+    select(columns = '*') {
+      this.params.set('select', columns);
+      if (this.method !== 'GET') this.headers.Prefer = this.headers.Prefer || 'return=representation';
+      return this;
+    }
+
+    order(column, options = {}) {
+      this.orderValues.push(`${column}.${options.ascending ? 'asc' : 'desc'}`);
+      this.params.set('order', this.orderValues.join(','));
+      return this;
+    }
+
+    range(from, to) {
+      this.rangeValue = `${from}-${to}`;
+      return this;
+    }
+
+    limit(count) {
+      this.params.set('limit', String(count));
+      return this;
+    }
+
+    eq(column, value) {
+      this.params.set(column, `eq.${encodeFilterValue(value)}`);
+      return this;
+    }
+
+    not(column, operator, value) {
+      this.params.set(column, `not.${operator}.${encodeFilterValue(value)}`);
+      return this;
+    }
+
+    or(filter) {
+      this.params.set('or', `(${filter})`);
+      return this;
+    }
+
+    insert(payload) {
+      this.method = 'POST';
+      this.body = payload;
+      this.headers.Prefer = 'return=representation';
+      return this;
+    }
+
+    upsert(payload, options = {}) {
+      this.method = 'POST';
+      this.body = payload;
+      this.headers.Prefer = 'resolution=merge-duplicates,return=representation';
+      if (options.onConflict) this.params.set('on_conflict', options.onConflict);
+      return this;
+    }
+
+    delete() {
+      this.method = 'DELETE';
+      return this;
+    }
+
+    single() {
+      this.singleRow = true;
+      return this;
+    }
+
+    async execute() {
+      const url = new URL(`${config.SUPABASE_URL}/rest/v1/${this.table}`);
+      this.params.forEach((value, key) => url.searchParams.set(key, value));
+      const headers = authHeaders({
+        Accept: this.singleRow ? 'application/vnd.pgrst.object+json' : 'application/json',
+        ...this.headers
+      });
+      if (this.body !== undefined) headers['Content-Type'] = 'application/json';
+      if (this.rangeValue) headers.Range = this.rangeValue;
+
+      const response = await fetchWithTimeout(url.toString(), {
+        method: this.method,
+        headers,
+        body: this.body === undefined ? undefined : JSON.stringify(this.body)
+      });
+      return readResponse(response, this.singleRow);
+    }
+
+    then(resolve, reject) {
+      return this.execute().then(resolve, reject);
+    }
+
+    catch(reject) {
+      return this.execute().catch(reject);
+    }
+  }
+
+  function createRestClient() {
+    return {
+      auth: {
+        async getSession() {
+          const session = getStoredSession();
+          return { data: { session }, error: null };
+        },
+        async signInWithPassword({ email, password }) {
+          const response = await fetchWithTimeout(`${config.SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+            method: 'POST',
+            headers: {
+              apikey: config.SUPABASE_ANON_KEY,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ email, password })
+          });
+          const result = await readResponse(response);
+          if (result.error) return result;
+          setStoredSession(result.data);
+          return { data: { ...result.data, user: result.data?.user || null, session: result.data }, error: null };
+        },
+        async signUp({ email, password, options = {} }) {
+          const response = await fetchWithTimeout(`${config.SUPABASE_URL}/auth/v1/signup`, {
+            method: 'POST',
+            headers: {
+              apikey: config.SUPABASE_ANON_KEY,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ email, password, data: options.data || {} })
+          });
+          const result = await readResponse(response);
+          if (result.error) return result;
+          if (result.data?.access_token) setStoredSession(result.data);
+          return {
+            data: {
+              ...result.data,
+              user: result.data?.user || result.data,
+              session: result.data?.access_token ? result.data : null
+            },
+            error: null
+          };
+        },
+        async signOut() {
+          setStoredSession(null);
+          return { error: null };
+        }
+      },
+      from(table) {
+        return new RestQuery(table);
+      },
+      async rpc(name, payload = {}) {
+        const response = await fetchWithTimeout(`${config.SUPABASE_URL}/rest/v1/rpc/${name}`, {
+          method: 'POST',
+          headers: authHeaders({
+            Accept: 'application/json',
+            'Content-Type': 'application/json'
+          }),
+          body: JSON.stringify(payload)
+        });
+        return readResponse(response);
+      },
+      storage: {
+        from(bucket) {
+          return {
+            async upload(path, file, options = {}) {
+              const headers = authHeaders({
+                'Cache-Control': options.cacheControl || '3600',
+                'x-upsert': options.upsert ? 'true' : 'false',
+                'Content-Type': file?.type || 'application/octet-stream'
+              });
+              const response = await fetchWithTimeout(`${config.SUPABASE_URL}/storage/v1/object/${bucket}/${path}`, {
+                method: 'POST',
+                headers,
+                body: file
+              });
+              const result = await readResponse(response);
+              if (result.error) return result;
+              return { data: { ...(result.data || {}), path }, error: null };
+            },
+            getPublicUrl(path) {
+              return {
+                data: {
+                  publicUrl: `${config.SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`
+                }
+              };
+            }
+          };
+        }
+      }
     };
   }
 
@@ -90,16 +345,18 @@
   function getClient() {
     if (!isConfigured()) return null;
     if (!client) {
-      client = window.supabase.createClient(config.SUPABASE_URL, config.SUPABASE_ANON_KEY, {
-        auth: {
-          persistSession: true,
-          autoRefreshToken: true,
-          detectSessionInUrl: true
-        },
-        global: {
-          fetch: fetchWithTimeout
-        }
-      });
+      client = window.supabase?.createClient
+        ? window.supabase.createClient(config.SUPABASE_URL, config.SUPABASE_ANON_KEY, {
+          auth: {
+            persistSession: true,
+            autoRefreshToken: true,
+            detectSessionInUrl: true
+          },
+          global: {
+            fetch: fetchWithTimeout
+          }
+        })
+        : createRestClient();
     }
     return client;
   }
