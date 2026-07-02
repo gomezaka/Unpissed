@@ -3,6 +3,7 @@
   const STARTUP_WAIT_MS = 8000;
   const STARTUP_TIMEOUT_MS = 14000;
   const MAP_MARKER_LIMIT = 150;
+  const LOCATION_PREF_KEY = 'unpissed.location.enabled';
 
   const CRITERIA_LABELS = {
     cleanliness: 'Cleanliness',
@@ -115,7 +116,7 @@
       accessible: false
     },
     userLocation: null,
-    geoStatus: 'idle',
+    geoStatus: locationPreferenceEnabled() ? 'loading' : 'idle',
     geoError: '',
     addBathroomLocation: null,
     addBathroomPlace: null,
@@ -141,6 +142,57 @@
   function setState(patch) {
     state = { ...state, ...patch };
     render();
+  }
+
+  function locationPreferenceEnabled() {
+    try {
+      return window.localStorage?.getItem(LOCATION_PREF_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  }
+
+  function setLocationPreference(enabled) {
+    try {
+      if (enabled) {
+        window.localStorage?.setItem(LOCATION_PREF_KEY, 'true');
+      } else {
+        window.localStorage?.removeItem(LOCATION_PREF_KEY);
+      }
+    } catch {
+      // Location still works without localStorage; it just cannot be remembered.
+    }
+  }
+
+  async function geolocationPermissionState() {
+    if (!navigator.permissions?.query) return '';
+    try {
+      const permission = await navigator.permissions.query({ name: 'geolocation' });
+      return permission?.state || '';
+    } catch {
+      return '';
+    }
+  }
+
+  async function shouldAutoRequestLocation() {
+    if (!navigator.geolocation) return false;
+    const permission = await geolocationPermissionState();
+    if (permission === 'granted') return true;
+    if (permission === 'denied') {
+      setLocationPreference(false);
+      return false;
+    }
+    return locationPreferenceEnabled() && !navigator.permissions?.query;
+  }
+
+  async function bootstrapRememberedLocation() {
+    if (state.userLocation || state.geoStatus === 'loading' && !locationPreferenceEnabled()) return;
+    const shouldRequest = await shouldAutoRequestLocation();
+    if (!shouldRequest) {
+      if (state.geoStatus === 'loading') setState({ geoStatus: 'idle' });
+      return;
+    }
+    await requestUserLocation({ silent: true, remembered: true });
   }
 
   function isInstalledApp() {
@@ -785,6 +837,33 @@
   }
 
   function renderLocationRequiredCard() {
+    if (state.geoStatus === 'loading') {
+      return `
+        <article class="simple-card simple-card--compact">
+          <h3>Finding your location</h3>
+          <p>Near me is active. Updating your position from this device.</p>
+          <button class="secondary-button full-width" data-action="recenter">Recenter</button>
+        </article>
+      `;
+    }
+    if (state.geoStatus === 'error') {
+      return `
+        <article class="simple-card simple-card--compact">
+          <h3>Location unavailable</h3>
+          <p>${escapeHtml(state.geoError || 'Location access is needed for Near me.')}</p>
+          <button class="secondary-button full-width" data-action="request-location">Retry location</button>
+        </article>
+      `;
+    }
+    if (locationPreferenceEnabled()) {
+      return `
+        <article class="simple-card simple-card--compact">
+          <h3>Location remembered</h3>
+          <p>Near me is enabled. Refresh your position if this device did not update automatically.</p>
+          <button class="secondary-button full-width" data-action="recenter">Recenter</button>
+        </article>
+      `;
+    }
     return `
       <article class="simple-card simple-card--compact">
         <h3>Enable location for nearby</h3>
@@ -857,12 +936,30 @@
         </article>
       `;
     }
+    if (status === 'loading') {
+      return `
+        <article class="location-strip">
+          <span>${icon('locate')}</span>
+          <div><b>Finding location</b><small>Near me is active. Updating distance from this device.</small></div>
+          <button data-action="recenter">Recenter</button>
+        </article>
+      `;
+    }
     if (status === 'error') {
       return `
         <article class="location-strip location-strip--error">
           <span>${icon('locate')}</span>
           <div><b>Location unavailable</b><small>${escapeHtml(state.geoError || 'Allow location access to sort by distance.')}</small></div>
           <button data-action="request-location">Retry</button>
+        </article>
+      `;
+    }
+    if (locationPreferenceEnabled()) {
+      return `
+        <article class="location-strip location-strip--ready">
+          <span>${icon('locate')}</span>
+          <div><b>Location remembered</b><small>Near me will update automatically when permission is available.</small></div>
+          <button data-action="recenter">Recenter</button>
         </article>
       `;
     }
@@ -2152,6 +2249,7 @@
             accuracy: position.coords.accuracy,
             updatedAt: new Date().toISOString()
           };
+          setLocationPreference(true);
           state = {
             ...state,
             userLocation: nextLocation,
@@ -2170,6 +2268,7 @@
             : error.code === 2
               ? 'Your position is currently unavailable.'
               : 'Location request timed out.';
+          if (error.code === 1) setLocationPreference(false);
           state = { ...state, geoStatus: 'error', geoError: message };
           render();
           if (!options.silent) toast('Location failed', message);
@@ -2700,5 +2799,6 @@
   }
 
   render();
+  bootstrapRememberedLocation().catch(() => {});
   initApp();
 })();
