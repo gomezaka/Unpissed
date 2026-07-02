@@ -1,0 +1,917 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Unpissed Location QA</title>
+    <link rel="stylesheet" href="../vendor/leaflet/leaflet.css" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0f18;
+        --panel: #141a27;
+        --panel-2: #1a2232;
+        --line: #313a51;
+        --text: #f7f9ff;
+        --muted: #aeb9d1;
+        --blue: #4f7fff;
+        --green: #55d6a4;
+        --red: #ff607b;
+        --gold: #ffce6a;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      button,
+      input,
+      textarea,
+      select {
+        font: inherit;
+      }
+
+      button {
+        border: 0;
+        cursor: pointer;
+      }
+
+      .app {
+        display: grid;
+        grid-template-columns: 420px minmax(0, 1fr);
+        min-height: 100vh;
+      }
+
+      aside,
+      main {
+        min-width: 0;
+      }
+
+      aside {
+        border-right: 1px solid var(--line);
+        background: #0f1420;
+        overflow: auto;
+      }
+
+      .sidebar-inner {
+        padding: 18px;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: 24px;
+        letter-spacing: 0;
+      }
+
+      .subtitle {
+        margin-top: 6px;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+
+      .toolbar {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin: 16px 0;
+      }
+
+      .button {
+        min-height: 42px;
+        border-radius: 10px;
+        padding: 0 13px;
+        background: var(--blue);
+        color: white;
+        font-weight: 800;
+      }
+
+      .button.secondary {
+        background: var(--panel-2);
+        color: var(--text);
+        border: 1px solid var(--line);
+      }
+
+      .button.good {
+        background: var(--green);
+        color: #07130f;
+      }
+
+      .button.warn {
+        background: var(--gold);
+        color: #1b1403;
+      }
+
+      .button:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+
+      .field {
+        display: grid;
+        gap: 7px;
+        margin-bottom: 12px;
+      }
+
+      .field span {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      input,
+      textarea,
+      select {
+        width: 100%;
+        min-height: 42px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px 12px;
+        background: var(--panel);
+        color: var(--text);
+      }
+
+      textarea {
+        min-height: 180px;
+        resize: vertical;
+        font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+        font-size: 12px;
+      }
+
+      .status {
+        margin: 10px 0 14px;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        color: var(--muted);
+        background: var(--panel);
+        line-height: 1.35;
+      }
+
+      .list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .row {
+        display: grid;
+        gap: 5px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--panel);
+        text-align: left;
+        color: var(--text);
+      }
+
+      .row.is-active {
+        border-color: var(--blue);
+        box-shadow: 0 0 0 1px rgba(79, 127, 255, 0.45);
+      }
+
+      .row b {
+        overflow-wrap: anywhere;
+      }
+
+      .row small {
+        color: var(--muted);
+        line-height: 1.35;
+      }
+
+      .content {
+        display: grid;
+        grid-template-rows: minmax(320px, 46vh) minmax(0, 1fr);
+        min-height: 100vh;
+      }
+
+      #map {
+        min-height: 320px;
+        background: #dbe5ed;
+      }
+
+      .workbench {
+        overflow: auto;
+        padding: 18px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
+        gap: 16px;
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 14px;
+        background: var(--panel);
+      }
+
+      .card h2 {
+        margin-bottom: 10px;
+        font-size: 18px;
+      }
+
+      .meta-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .meta {
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--panel-2);
+      }
+
+      .meta span {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .meta b {
+        display: block;
+        margin-top: 4px;
+        overflow-wrap: anywhere;
+      }
+
+      .suggestions {
+        display: grid;
+        gap: 10px;
+      }
+
+      .suggestion {
+        display: grid;
+        gap: 7px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--panel-2);
+        color: var(--text);
+        text-align: left;
+      }
+
+      .suggestion.is-active {
+        border-color: var(--green);
+        box-shadow: 0 0 0 1px rgba(85, 214, 164, 0.45);
+      }
+
+      .score {
+        display: inline-flex;
+        width: fit-content;
+        min-height: 24px;
+        align-items: center;
+        border-radius: 999px;
+        padding: 2px 8px;
+        background: rgba(85, 214, 164, 0.14);
+        color: var(--green);
+        font-size: 12px;
+        font-weight: 900;
+      }
+
+      .old-pin {
+        background: var(--red);
+        border: 2px solid white;
+        border-radius: 999px;
+        width: 18px;
+        height: 18px;
+      }
+
+      .new-pin {
+        background: var(--green);
+        border: 2px solid white;
+        border-radius: 999px;
+        width: 22px;
+        height: 22px;
+      }
+
+      @media (max-width: 980px) {
+        .app {
+          grid-template-columns: 1fr;
+        }
+
+        aside {
+          max-height: 52vh;
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .content {
+          min-height: 0;
+        }
+
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside>
+        <div class="sidebar-inner">
+          <h1>Location QA</h1>
+          <p class="subtitle">Geocode deleted seed venues, verify the marker, then generate SQL to reinsert bathrooms with real coordinates.</p>
+          <div class="toolbar">
+            <button class="button" id="load-candidates">Load candidates</button>
+            <button class="button secondary" id="export-json">Export JSON</button>
+          </div>
+          <label class="field">
+            <span>Filter</span>
+            <input id="filter" placeholder="City, venue or address" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Paste candidates JSON</span>
+            <textarea id="json-input" placeholder="Optional: paste exported location_qa_candidates JSON here."></textarea>
+          </label>
+          <div class="toolbar">
+            <button class="button secondary" id="import-json">Import JSON</button>
+            <button class="button secondary" id="clear-local">Clear choices</button>
+          </div>
+          <div class="status" id="status">Run the reset SQL first, then load candidates.</div>
+          <div class="list" id="candidate-list"></div>
+        </div>
+      </aside>
+
+      <main class="content">
+        <div id="map" aria-label="Venue location QA map"></div>
+        <section class="workbench">
+          <div class="grid">
+            <div class="card">
+              <h2 id="candidate-title">No candidate selected</h2>
+              <div class="meta-grid" id="candidate-meta"></div>
+              <div class="toolbar">
+                <button class="button" id="geocode-selected" disabled>Search map data</button>
+                <button class="button secondary" id="batch-geocode" disabled>Batch search</button>
+              </div>
+              <div class="suggestions" id="suggestions"></div>
+            </div>
+
+            <div class="card">
+              <h2>Accepted SQL</h2>
+              <p class="subtitle">Use this in Supabase SQL Editor after visually checking each pin.</p>
+              <div class="toolbar">
+                <button class="button good" id="accept-current" disabled>Accept marker</button>
+                <button class="button warn" id="copy-sql">Copy SQL</button>
+              </div>
+              <textarea id="sql-output" readonly placeholder="Accepted venue SQL appears here."></textarea>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="../js/config.js"></script>
+    <script src="../vendor/leaflet/leaflet.js"></script>
+    <script>
+      (() => {
+        const config = window.UNPISSED_CONFIG || {};
+        const state = {
+          candidates: [],
+          filtered: [],
+          selectedId: '',
+          suggestions: [],
+          chosen: null,
+          accepted: loadAccepted()
+        };
+
+        const els = {
+          status: document.querySelector('#status'),
+          list: document.querySelector('#candidate-list'),
+          filter: document.querySelector('#filter'),
+          title: document.querySelector('#candidate-title'),
+          meta: document.querySelector('#candidate-meta'),
+          suggestions: document.querySelector('#suggestions'),
+          sql: document.querySelector('#sql-output'),
+          jsonInput: document.querySelector('#json-input'),
+          load: document.querySelector('#load-candidates'),
+          exportJson: document.querySelector('#export-json'),
+          importJson: document.querySelector('#import-json'),
+          clearLocal: document.querySelector('#clear-local'),
+          geocode: document.querySelector('#geocode-selected'),
+          batch: document.querySelector('#batch-geocode'),
+          accept: document.querySelector('#accept-current'),
+          copySql: document.querySelector('#copy-sql')
+        };
+
+        const map = L.map('map', { zoomControl: true }).setView(config.MAP_DEFAULT_CENTER || [59.2478, 11.0219], config.MAP_DEFAULT_ZOOM || 11);
+        L.tileLayer(config.MAP_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: config.MAP_TILE_ATTRIBUTION || '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        const oldIcon = L.divIcon({ className: 'old-pin', iconSize: [18, 18], iconAnchor: [9, 9] });
+        const newIcon = L.divIcon({ className: 'new-pin', iconSize: [22, 22], iconAnchor: [11, 11] });
+        let oldMarker = null;
+        let chosenMarker = null;
+        const suggestionLayer = L.layerGroup().addTo(map);
+
+        function setStatus(message) {
+          els.status.textContent = message;
+        }
+
+        function headers() {
+          return {
+            apikey: config.SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${config.SUPABASE_ANON_KEY}`,
+            Accept: 'application/json'
+          };
+        }
+
+        function loadAccepted() {
+          try {
+            return JSON.parse(localStorage.getItem('unpissed.locationQa.accepted') || '{}');
+          } catch {
+            return {};
+          }
+        }
+
+        function saveAccepted() {
+          localStorage.setItem('unpissed.locationQa.accepted', JSON.stringify(state.accepted));
+        }
+
+        function normalizeCandidate(row) {
+          return {
+            source_bathroom_id: row.source_bathroom_id || row.id,
+            name: row.name || '',
+            venue_name: row.venue_name || row.venueName || '',
+            type: row.type || 'Other',
+            access_mode: row.access_mode || 'customer-only',
+            access_note: row.access_note || 'Unverified seed throne: likely guest toilet at venue. Verify access, code/key, opening hours and facilities before approving.',
+            address: row.address || '',
+            city: row.city || '',
+            country: row.country || 'Norway',
+            old_lat: numberOrNull(row.old_lat ?? row.lat),
+            old_lng: numberOrNull(row.old_lng ?? row.lng),
+            facilities: Array.isArray(row.facilities) ? row.facilities : ['guest_toilet', 'unverified', 'venue_seed'],
+            vibe_tags: Array.isArray(row.vibe_tags) ? row.vibe_tags : ['unverified', 'seed'],
+            crowd_level: row.crowd_level || 'Unverified',
+            status: row.status || 'UNUSED',
+            map_x: row.map_x ?? 50,
+            map_y: row.map_y ?? 50
+          };
+        }
+
+        function numberOrNull(value) {
+          const number = Number(value);
+          return Number.isFinite(number) ? number : null;
+        }
+
+        function selected() {
+          return state.candidates.find((item) => item.source_bathroom_id === state.selectedId) || null;
+        }
+
+        function displayName(item) {
+          return item.venue_name || item.name.replace(/^Toalett\s*[-–]\s*/i, '') || item.name;
+        }
+
+        function searchText(item) {
+          return [item.name, item.venue_name, item.address, item.city, item.country, item.type].join(' ').toLowerCase();
+        }
+
+        function applyFilter() {
+          const term = els.filter.value.trim().toLowerCase();
+          state.filtered = state.candidates.filter((item) => !term || searchText(item).includes(term));
+          renderList();
+        }
+
+        async function loadCandidates() {
+          if (!config.SUPABASE_URL || !config.SUPABASE_ANON_KEY) {
+            setStatus('Missing Supabase config in js/config.js.');
+            return;
+          }
+          setStatus('Loading location_qa_candidates from Supabase...');
+          try {
+            const url = `${config.SUPABASE_URL}/rest/v1/location_qa_candidates?select=*&order=city.asc,venue_name.asc`;
+            const response = await fetch(url, { headers: headers() });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const rows = await response.json();
+            state.candidates = rows.map(normalizeCandidate);
+            state.selectedId = state.candidates[0]?.source_bathroom_id || '';
+            applyFilter();
+            renderSelected();
+            setStatus(`Loaded ${state.candidates.length} QA candidates.`);
+          } catch (error) {
+            setStatus(`Could not load candidates. Run reset_unverified_seed_bathrooms_for_location_qa.sql first. ${error.message}`);
+          }
+        }
+
+        function importJson() {
+          try {
+            const rows = JSON.parse(els.jsonInput.value || '[]');
+            state.candidates = (Array.isArray(rows) ? rows : rows.candidates || []).map(normalizeCandidate);
+            state.selectedId = state.candidates[0]?.source_bathroom_id || '';
+            applyFilter();
+            renderSelected();
+            setStatus(`Imported ${state.candidates.length} candidates from JSON.`);
+          } catch (error) {
+            setStatus(`JSON import failed: ${error.message}`);
+          }
+        }
+
+        function exportJson() {
+          els.jsonInput.value = JSON.stringify(state.candidates, null, 2);
+          setStatus('Candidate JSON copied into the textarea.');
+        }
+
+        function renderList() {
+          els.list.innerHTML = state.filtered.map((item) => {
+            const accepted = state.accepted[item.source_bathroom_id];
+            return `
+              <button class="row ${item.source_bathroom_id === state.selectedId ? 'is-active' : ''}" data-id="${escapeHtml(item.source_bathroom_id)}">
+                <b>${escapeHtml(displayName(item))}</b>
+                <small>${escapeHtml([item.address, item.city].filter(Boolean).join(', ') || 'No address')}</small>
+                <small>${accepted ? `Accepted: ${Number(accepted.lat).toFixed(5)}, ${Number(accepted.lng).toFixed(5)}` : 'Needs location QA'}</small>
+              </button>
+            `;
+          }).join('') || '<div class="status">No candidates match the filter.</div>';
+          els.list.querySelectorAll('[data-id]').forEach((button) => {
+            button.addEventListener('click', () => {
+              state.selectedId = button.dataset.id;
+              state.suggestions = [];
+              state.chosen = state.accepted[state.selectedId] || null;
+              renderList();
+              renderSelected();
+            });
+          });
+          els.batch.disabled = !state.candidates.length;
+          renderSql();
+        }
+
+        function renderSelected() {
+          const item = selected();
+          els.geocode.disabled = !item;
+          els.accept.disabled = !state.chosen;
+          if (!item) {
+            els.title.textContent = 'No candidate selected';
+            els.meta.innerHTML = '';
+            els.suggestions.innerHTML = '';
+            resetMap();
+            return;
+          }
+
+          els.title.textContent = displayName(item);
+          els.meta.innerHTML = [
+            ['Name', item.name],
+            ['Venue', item.venue_name || '-'],
+            ['Type', item.type],
+            ['Address', item.address || '-'],
+            ['City', item.city || '-'],
+            ['Old coordinates', item.old_lat && item.old_lng ? `${item.old_lat}, ${item.old_lng}` : 'none']
+          ].map(([label, value]) => `
+            <div class="meta">
+              <span>${escapeHtml(label)}</span>
+              <b>${escapeHtml(value)}</b>
+            </div>
+          `).join('');
+          renderSuggestions();
+          renderMap();
+        }
+
+        function resetMap() {
+          suggestionLayer.clearLayers();
+          if (oldMarker) oldMarker.remove();
+          if (chosenMarker) chosenMarker.remove();
+          oldMarker = null;
+          chosenMarker = null;
+        }
+
+        function renderMap() {
+          const item = selected();
+          resetMap();
+          if (!item) return;
+
+          const points = [];
+          if (item.old_lat !== null && item.old_lng !== null) {
+            oldMarker = L.marker([item.old_lat, item.old_lng], { icon: oldIcon, title: 'Old seed coordinate' }).addTo(map);
+            points.push([item.old_lat, item.old_lng]);
+          }
+
+          state.suggestions.forEach((suggestion, index) => {
+            const marker = L.marker([suggestion.lat, suggestion.lng], { title: suggestion.label })
+              .bindPopup(`<b>${escapeHtml(suggestion.name)}</b><br>${escapeHtml(suggestion.label)}<br>Score ${suggestion.score}`);
+            marker.on('click', () => chooseSuggestion(index));
+            marker.addTo(suggestionLayer);
+            points.push([suggestion.lat, suggestion.lng]);
+          });
+
+          const accepted = state.chosen || state.accepted[item.source_bathroom_id];
+          if (accepted) {
+            chosenMarker = L.marker([accepted.lat, accepted.lng], {
+              icon: newIcon,
+              draggable: true,
+              title: 'Accepted coordinate'
+            }).addTo(map);
+            chosenMarker.on('dragend', () => {
+              const next = chosenMarker.getLatLng();
+              state.chosen = { ...accepted, lat: next.lat, lng: next.lng, source: 'manual-drag' };
+              renderSelected();
+            });
+            points.push([accepted.lat, accepted.lng]);
+          }
+
+          if (points.length) {
+            map.fitBounds(points, { padding: [40, 40], maxZoom: 18 });
+          } else {
+            map.setView(config.MAP_DEFAULT_CENTER || [59.2478, 11.0219], config.MAP_DEFAULT_ZOOM || 11);
+          }
+        }
+
+        function renderSuggestions() {
+          els.suggestions.innerHTML = state.suggestions.map((suggestion, index) => `
+            <button class="suggestion ${state.chosen?.sourceIndex === index ? 'is-active' : ''}" data-suggestion="${index}">
+              <span class="score">Score ${suggestion.score}</span>
+              <b>${escapeHtml(suggestion.name)}</b>
+              <small>${escapeHtml(suggestion.label)}</small>
+              <small>${Number(suggestion.lat).toFixed(6)}, ${Number(suggestion.lng).toFixed(6)}</small>
+            </button>
+          `).join('') || '<div class="status">No suggestions yet. Search map data for this venue.</div>';
+          els.suggestions.querySelectorAll('[data-suggestion]').forEach((button) => {
+            button.addEventListener('click', () => chooseSuggestion(Number(button.dataset.suggestion)));
+          });
+        }
+
+        function chooseSuggestion(index) {
+          const suggestion = state.suggestions[index];
+          if (!suggestion) return;
+          state.chosen = { ...suggestion, sourceIndex: index };
+          renderSelected();
+        }
+
+        function queryFor(item) {
+          return [
+            displayName(item),
+            item.address,
+            item.city,
+            item.country || 'Norway'
+          ].filter(Boolean).join(', ');
+        }
+
+        async function geocodeItem(item) {
+          const url = new URL('https://nominatim.openstreetmap.org/search');
+          url.searchParams.set('format', 'jsonv2');
+          url.searchParams.set('addressdetails', '1');
+          url.searchParams.set('limit', '8');
+          url.searchParams.set('countrycodes', 'no');
+          url.searchParams.set('q', queryFor(item));
+          const response = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
+          if (!response.ok) throw new Error(`Nominatim HTTP ${response.status}`);
+          const rows = await response.json();
+          return rows.map((row) => normalizeSuggestion(row, item))
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 5);
+        }
+
+        function normalizeSuggestion(row, item) {
+          const address = row.address || {};
+          const label = row.display_name || '';
+          const name = row.name || address.amenity || address.shop || label.split(',')[0] || displayName(item);
+          return {
+            name,
+            label,
+            lat: Number(row.lat),
+            lng: Number(row.lon),
+            osmType: row.osm_type,
+            osmId: row.osm_id,
+            className: row.class,
+            type: row.type,
+            address: compactAddress(address),
+            score: scoreSuggestion({ ...row, name, label }, item),
+            source: 'nominatim'
+          };
+        }
+
+        function compactAddress(address = {}) {
+          const street = [address.road, address.house_number].filter(Boolean).join(' ');
+          const city = address.city || address.town || address.village || address.municipality;
+          return [street, address.postcode, city].filter(Boolean).join(', ');
+        }
+
+        function normalizeText(value) {
+          return String(value || '')
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9]+/g, ' ')
+            .trim();
+        }
+
+        function scoreSuggestion(row, item) {
+          const venue = normalizeText(displayName(item));
+          const rowName = normalizeText(row.name || row.label);
+          const label = normalizeText(row.label);
+          const city = normalizeText(item.city);
+          const address = normalizeText(item.address);
+          let score = 0;
+          if (rowName && venue && (rowName.includes(venue) || venue.includes(rowName))) score += 42;
+          if (label && venue && label.includes(venue.split(' ')[0])) score += 12;
+          if (city && label.includes(city)) score += 22;
+          if (address) {
+            const addressParts = address.split(' ').filter((part) => part.length > 1);
+            score += Math.min(24, addressParts.filter((part) => label.includes(part)).length * 6);
+          }
+          if (['restaurant', 'cafe', 'bar', 'pub', 'fast_food'].includes(String(row.type || '').toLowerCase())) score += 8;
+          if (String(row.class || '').toLowerCase() === 'amenity') score += 6;
+          return Math.min(100, score);
+        }
+
+        async function geocodeSelected() {
+          const item = selected();
+          if (!item) return;
+          setStatus(`Searching map data for ${displayName(item)}...`);
+          try {
+            state.suggestions = await geocodeItem(item);
+            state.chosen = state.suggestions[0] ? { ...state.suggestions[0], sourceIndex: 0 } : null;
+            renderSelected();
+            setStatus(state.suggestions.length ? `Found ${state.suggestions.length} suggestions.` : 'No suggestions found.');
+          } catch (error) {
+            setStatus(`Search failed: ${error.message}`);
+          }
+        }
+
+        async function batchGeocode() {
+          const todo = state.filtered.length ? state.filtered : state.candidates;
+          for (let index = 0; index < todo.length; index += 1) {
+            const item = todo[index];
+            if (state.accepted[item.source_bathroom_id]) continue;
+            state.selectedId = item.source_bathroom_id;
+            renderList();
+            renderSelected();
+            setStatus(`Batch ${index + 1}/${todo.length}: ${displayName(item)}`);
+            try {
+              state.suggestions = await geocodeItem(item);
+              if (state.suggestions[0]?.score >= 70) {
+                state.chosen = { ...state.suggestions[0], sourceIndex: 0 };
+              }
+              renderSelected();
+            } catch (error) {
+              setStatus(`Batch search failed for ${displayName(item)}: ${error.message}`);
+            }
+            await new Promise((resolve) => setTimeout(resolve, 1200));
+          }
+          setStatus('Batch search complete. Review and accept pins manually.');
+        }
+
+        function acceptCurrent() {
+          const item = selected();
+          if (!item || !state.chosen) return;
+          state.accepted[item.source_bathroom_id] = {
+            ...state.chosen,
+            acceptedAt: new Date().toISOString()
+          };
+          saveAccepted();
+          renderList();
+          renderSelected();
+          renderSql();
+          setStatus(`Accepted coordinate for ${displayName(item)}.`);
+        }
+
+        function renderSql() {
+          const statements = Object.entries(state.accepted)
+            .map(([id, accepted]) => {
+              const item = state.candidates.find((candidate) => candidate.source_bathroom_id === id);
+              return item ? sqlForAccepted(item, accepted) : '';
+            })
+            .filter(Boolean);
+          els.sql.value = statements.join('\n\n');
+        }
+
+        function sqlForAccepted(item, accepted) {
+          const facilities = unique([...(item.facilities || []), 'guest_toilet', 'unverified', 'venue_seed']);
+          const vibeTags = unique([...(item.vibe_tags || []), 'unverified', 'seed', 'location-verified']);
+          const address = item.address || accepted.address || '';
+          const source = `${accepted.source || 'manual'}:${accepted.osmType || ''}/${accepted.osmId || ''}`;
+          return `insert into public.bathrooms (
+  id, name, venue_name, type, access_mode, access_note, address, city, country, lat, lng,
+  is_open_now, facilities, vibe_tags, crowd_level, status, map_x, map_y, added_by,
+  moderation_status, created_at, updated_at
+) values (
+  '${item.source_bathroom_id}'::uuid,
+  ${sqlString(item.name)},
+  ${sqlString(item.venue_name || displayName(item))},
+  ${sqlString(item.type || 'Other')},
+  ${sqlString(item.access_mode || 'customer-only')},
+  ${sqlString(item.access_note || 'Unverified seed throne: likely guest toilet at venue. Verify access, code/key, opening hours and facilities before approving.')},
+  ${sqlString(address || null)},
+  ${sqlString(item.city || null)},
+  ${sqlString(item.country || 'Norway')},
+  ${Number(accepted.lat).toFixed(7)},
+  ${Number(accepted.lng).toFixed(7)},
+  true,
+  ${sqlArray(facilities)},
+  ${sqlArray(vibeTags)},
+  ${sqlString(item.crowd_level || 'Unverified')},
+  'UNUSED',
+  ${Number(item.map_x || 50).toFixed(2)},
+  ${Number(item.map_y || 50).toFixed(2)},
+  null,
+  'unused',
+  now(),
+  now()
+)
+on conflict (id) do update set
+  name = excluded.name,
+  venue_name = excluded.venue_name,
+  type = excluded.type,
+  access_mode = excluded.access_mode,
+  access_note = excluded.access_note,
+  address = excluded.address,
+  city = excluded.city,
+  country = excluded.country,
+  lat = excluded.lat,
+  lng = excluded.lng,
+  is_open_now = excluded.is_open_now,
+  facilities = excluded.facilities,
+  vibe_tags = excluded.vibe_tags,
+  crowd_level = excluded.crowd_level,
+  status = excluded.status,
+  map_x = excluded.map_x,
+  map_y = excluded.map_y,
+  moderation_status = excluded.moderation_status,
+  updated_at = now();
+
+update public.location_qa_candidates
+set qa_status = 'inserted',
+    qa_lat = ${Number(accepted.lat).toFixed(7)},
+    qa_lng = ${Number(accepted.lng).toFixed(7)},
+    qa_address = ${sqlString(address || accepted.label || null)},
+    qa_source = ${sqlString(source)},
+    updated_at = now()
+where source_bathroom_id = '${item.source_bathroom_id}'::uuid;`;
+        }
+
+        function unique(values) {
+          return [...new Set(values.map((value) => String(value || '').trim()).filter(Boolean))];
+        }
+
+        function sqlString(value) {
+          if (value === null || value === undefined || value === '') return 'null';
+          return `'${String(value).replace(/'/g, "''")}'`;
+        }
+
+        function sqlArray(values) {
+          return `ARRAY[${unique(values).map(sqlString).join(',')}]::text[]`;
+        }
+
+        function escapeHtml(value) {
+          return String(value ?? '')
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#039;');
+        }
+
+        async function copySql() {
+          try {
+            await navigator.clipboard.writeText(els.sql.value);
+            setStatus('SQL copied to clipboard.');
+          } catch {
+            els.sql.select();
+            document.execCommand('copy');
+            setStatus('SQL selected/copied.');
+          }
+        }
+
+        els.load.addEventListener('click', loadCandidates);
+        els.exportJson.addEventListener('click', exportJson);
+        els.importJson.addEventListener('click', importJson);
+        els.clearLocal.addEventListener('click', () => {
+          state.accepted = {};
+          saveAccepted();
+          renderList();
+          renderSelected();
+          renderSql();
+          setStatus('Local accepted choices cleared.');
+        });
+        els.filter.addEventListener('input', applyFilter);
+        els.geocode.addEventListener('click', geocodeSelected);
+        els.batch.addEventListener('click', batchGeocode);
+        els.accept.addEventListener('click', acceptCurrent);
+        els.copySql.addEventListener('click', copySql);
+
+        renderList();
+        renderSelected();
+        renderSql();
+      })();
+    </script>
+  </body>
+</html>

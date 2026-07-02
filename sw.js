@@ -1,7 +1,9 @@
-const CACHE_NAME = 'unpissed-v0.6.1.8.0';
+const CACHE_NAME = 'unpissed-v0.6.1.9.3';
 const ASSETS = [
   './',
   './index.html',
+  './privacy.html',
+  './terms.html',
   './css/styles.css',
   './vendor/leaflet/leaflet.css',
   './vendor/leaflet/leaflet.js',

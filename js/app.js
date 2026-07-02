@@ -107,6 +107,10 @@
     profiles: [],
     follows: [],
     friendQuery: '',
+    selectedProfileId: null,
+    profileDetailsById: {},
+    profileDetailsLoadingId: null,
+    profileDetailsError: '',
     reviewsByBathroom: {},
     loading: true,
     filters: {
@@ -572,6 +576,52 @@
     return { followingIds, followerIds, friendIds };
   }
 
+  function profileById(profileId) {
+    if (!profileId) return null;
+    if (state.authProfile?.id === profileId || state.authUser?.id === profileId) {
+      const displayName = state.authProfile?.display_name || currentDisplayName();
+      return {
+        id: profileId,
+        displayName,
+        handle: state.authProfile?.handle || '',
+        city: state.authProfile?.city || '',
+        avatarUrl: state.authProfile?.avatar_url || '',
+        initials: initialsFromName(displayName),
+        createdAt: state.authProfile?.created_at || ''
+      };
+    }
+    return (state.profiles || []).find((profile) => profile.id === profileId) || null;
+  }
+
+  function friendRequests(sets = followSets()) {
+    if (!state.authUser) return [];
+    return [...sets.followerIds]
+      .filter((profileId) => !sets.followingIds.has(profileId))
+      .map(profileById)
+      .filter(Boolean)
+      .sort((a, b) => String(a.displayName || '').localeCompare(String(b.displayName || '')));
+  }
+
+  function notificationCount() {
+    return friendRequests().length + (state.feed?.length || 0);
+  }
+
+  function publicProfileStats(details = {}) {
+    const checkins = Array.isArray(details.checkins) ? details.checkins : [];
+    const badges = Array.isArray(details.badges) ? details.badges : [];
+    const uniqueBathrooms = new Set(checkins.map((item) => item.bathroomId).filter(Boolean));
+    const ratings = checkins.map((item) => Number(item.rating)).filter((value) => Number.isFinite(value) && value > 0);
+    const averageRating = ratings.length
+      ? ratings.reduce((sum, value) => sum + value, 0) / ratings.length
+      : 0;
+    return {
+      checkins: checkins.length,
+      uniqueBathrooms: uniqueBathrooms.size,
+      badges: badges.length,
+      averageRating
+    };
+  }
+
   function filteredProfilesForFriends(sets = followSets()) {
     const currentUserId = state.authUser?.id;
     const term = String(state.friendQuery || '').trim().toLowerCase();
@@ -637,6 +687,7 @@
 
   function renderHeader() {
     const initials = state.authUser ? initialsFromName(currentDisplayName()) : 'UP';
+    const unreadCount = notificationCount();
     return `
       <header class="header">
         <div>
@@ -647,9 +698,9 @@
           <p class="tagline">Find the throne before it's too late</p>
         </div>
         <div class="header-actions">
-          <button class="icon-button" data-action="open-notifications" aria-label="Notifications">
+          <button class="icon-button" data-action="open-notifications" aria-label="Notifications${unreadCount ? `, ${unreadCount} items` : ''}">
             ${icon('bell')}
-            ${state.feed.length ? '<span class="notification-dot" aria-hidden="true"></span>' : ''}
+            ${unreadCount ? '<span class="notification-dot" aria-hidden="true"></span>' : ''}
           </button>
           <button class="avatar" data-action="open-auth" aria-label="Account">${escapeHtml(initials)}</button>
         </div>
@@ -1126,6 +1177,11 @@
           <small>${escapeHtml(handle)} &middot; ${escapeHtml(friendMeta(profile, sets))}</small>
         </div>
         <button
+          class="friend-view"
+          data-action="open-profile"
+          data-profile-id="${escapeHtml(profile.id)}"
+        >View</button>
+        <button
           class="friend-action ${isFollowing ? 'is-added' : ''} ${isFriend ? 'is-friend' : ''}"
           data-action="toggle-friend"
           data-user-id="${escapeHtml(profile.id)}"
@@ -1142,6 +1198,7 @@
     const followingCount = sets.followingIds.size;
     const followerCount = sets.followerIds.size;
     const peopleCount = state.profiles?.length || 0;
+    const requests = friendRequests(sets);
 
     if (!signedIn) {
       return `
@@ -1173,6 +1230,15 @@
           <div class="stat-card"><b>${followerCount}</b><span>Followers</span></div>
           <div class="stat-card"><b>${peopleCount}</b><span>People</span></div>
         </div>
+        ${requests.length ? `
+          <div class="section-row section-row--tight">
+            <h2 class="section-title">Friend requests</h2>
+            <span class="section-meta">${requests.length}</span>
+          </div>
+          <div class="friend-request-list">
+            ${requests.map(renderFriendRequestRow).join('')}
+          </div>
+        ` : ''}
         <form class="search-card friends-search" data-form="friends-search">
           <label class="sr-only" for="friend-search">Search people</label>
           <input id="friend-search" name="query" value="${escapeHtml(state.friendQuery || '')}" placeholder="Search people" autocomplete="off" />
@@ -1358,6 +1424,7 @@
     if (state.modal === 'details') return renderDetailsModal();
     if (state.modal === 'addBathroom') return renderAddBathroomModal();
     if (state.modal === 'notifications') return renderNotificationsModal();
+    if (state.modal === 'profileView') return renderPublicProfileModal();
     if (state.modal === 'auth') return renderAuthModal();
     return '';
   }
@@ -1597,6 +1664,11 @@
     const isSignup = mode === 'signup';
     const body = `
       <form class="auth-form" data-form="auth">
+        <button class="oauth-button" type="button" data-action="sign-in-google" ${state.authSubmitting ? 'disabled' : ''}>
+          <span class="oauth-button__mark" aria-hidden="true">G</span>
+          <span>Continue with Google</span>
+        </button>
+        <div class="auth-divider"><span>or</span></div>
         <div class="auth-mode-toggle" role="tablist" aria-label="Account mode">
           <button type="button" class="${!isSignup ? 'is-active' : ''}" data-action="set-auth-mode" data-auth-mode="signin" role="tab" aria-selected="${!isSignup}">Sign in</button>
           <button type="button" class="${isSignup ? 'is-active' : ''}" data-action="set-auth-mode" data-auth-mode="signup" role="tab" aria-selected="${isSignup}">Create account</button>
@@ -1607,16 +1679,134 @@
         <label class="form-field"><span>Password</span><input name="password" type="password" required autocomplete="${isSignup ? 'new-password' : 'current-password'}" minlength="6" /></label>
         ${isSignup ? `<label class="form-field"><span>Display name</span><input name="displayName" autocomplete="nickname" placeholder="Optional" value="${escapeHtml(state.authDisplayName || '')}" /><small>Shown on non-anonymous activity.</small></label>` : ''}
         <button class="primary-button full-width" type="submit" name="mode" value="${mode}" ${state.authSubmitting ? 'disabled' : ''}>${state.authSubmitting ? 'Working...' : (isSignup ? 'Create account' : 'Sign in')}</button>
+        <p class="auth-legal">By continuing, you agree to the <a href="./terms.html" target="_blank" rel="noopener">Terms of Service</a> and acknowledge the <a href="./privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</p>
       </form>
     `;
     return renderModalShell(isSignup ? 'Create account' : 'Sign in', 'Save check-ins, photos and badge progress.', body);
   }
 
+  function renderFriendRequestRow(profile) {
+    return `
+      <article class="friend-request-row">
+        <div class="mini-avatar blue">${escapeHtml(profile.initials || initialsFromName(profile.displayName))}</div>
+        <div class="friend-row__copy">
+          <b>${escapeHtml(profile.displayName || 'Unpissed User')}</b>
+          <small>${escapeHtml(profile.handle ? `@${profile.handle}` : (profile.city || 'Wants to be friends'))}</small>
+        </div>
+        <button class="friend-view" data-action="open-profile" data-profile-id="${escapeHtml(profile.id)}">View</button>
+        <button class="friend-action" data-action="toggle-friend" data-user-id="${escapeHtml(profile.id)}">Accept</button>
+      </article>
+    `;
+  }
+
   function renderNotificationsModal() {
-    const body = state.feed.length
+    const requests = friendRequests();
+    const requestBlock = requests.length ? `
+      <div class="section-row section-row--tight">
+        <h2 class="section-title">Friend requests</h2>
+        <span class="section-meta">${requests.length}</span>
+      </div>
+      <div class="friend-request-list">
+        ${requests.map(renderFriendRequestRow).join('')}
+      </div>
+      <div style="height:14px"></div>
+    ` : '';
+    const activityBlock = state.feed.length
       ? renderActivityCard(state.feed.slice(0, 5))
-      : '<div class="empty-state">No notifications yet.</div>';
-    return renderModalShell('Notifications', 'Recent activity from Supabase.', body);
+      : (requests.length ? '' : '<div class="empty-state">No notifications yet.</div>');
+    const body = `
+      ${requestBlock}
+      ${state.feed.length ? '<div class="section-row section-row--tight"><h2 class="section-title">Activity</h2></div>' : ''}
+      ${activityBlock}
+    `;
+    return renderModalShell('Notifications', 'Friend requests and recent Supabase activity.', body);
+  }
+
+  function renderProfileBadgePills(details = {}) {
+    const badgeRows = Array.isArray(details.badges) ? details.badges : [];
+    if (!badgeRows.length) return '<div class="empty-state">No badges yet.</div>';
+    return `
+      <div class="public-badge-list">
+        ${badgeRows.slice(0, 12).map((row) => {
+          const badge = row.badges || state.badges.find((item) => item.id === row.badge_id) || { title: row.badge_id, icon: 'badge' };
+          return `
+            <span class="profile-badge-pill">
+              <span>${badgeIcon(badge)}</span>
+              <b>${escapeHtml(badge.title || row.badge_id)}</b>
+            </span>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  function renderProfileVisitList(profileId, details = {}) {
+    const viewingOwn = profileId === state.authUser?.id;
+    const visibleCheckins = (details.checkins || []).filter((item) => viewingOwn || !item.anonymous).slice(0, 6);
+    if (!visibleCheckins.length) {
+      return '<div class="empty-state">No visible do visits yet.</div>';
+    }
+    return `
+      <div class="history-list public-history-list">
+        ${visibleCheckins.map((item) => `
+          <div class="history-row">
+            <span>${escapeHtml(item.bathroomName)}</span>
+            <b>${rounded(item.rating)} star</b>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function renderPublicProfileModal() {
+    const profileId = state.selectedProfileId;
+    const profile = profileById(profileId);
+    const details = state.profileDetailsById[profileId] || {};
+    const loading = state.profileDetailsLoadingId === profileId;
+    const viewingOwn = profileId === state.authUser?.id;
+    const visibleDetails = viewingOwn
+      ? details
+      : { ...details, checkins: (details.checkins || []).filter((item) => !item.anonymous) };
+    const stats = publicProfileStats(visibleDetails);
+    const sets = followSets();
+    const relation = profile ? friendMeta(profile, sets) : '';
+    const body = !profile ? '<div class="empty-state">Profile not found.</div>' : `
+      <article class="simple-card public-profile-card">
+        <div class="public-profile-hero">
+          <div class="mini-avatar blue">${escapeHtml(profile.initials || initialsFromName(profile.displayName))}</div>
+          <div>
+            <h3>${escapeHtml(profile.displayName || 'Unpissed User')}</h3>
+            <p>${escapeHtml(profile.handle ? `@${profile.handle}` : (profile.city || relation || 'Unpissed user'))}</p>
+          </div>
+        </div>
+        <div class="stats-grid stats-grid--compact">
+          <div class="stat-card"><b>${loading ? '...' : stats.checkins}</b><span>Do visits</span></div>
+          <div class="stat-card"><b>${loading ? '...' : stats.uniqueBathrooms}</b><span>Unique toilets</span></div>
+          <div class="stat-card"><b>${loading ? '...' : stats.badges}</b><span>Badges</span></div>
+          <div class="stat-card"><b>${loading ? '...' : (stats.averageRating ? rounded(stats.averageRating) : '-')}</b><span>Avg relief</span></div>
+        </div>
+        ${viewingOwn ? '' : `
+          <div class="public-profile-actions">
+            <button class="secondary-button" data-action="toggle-friend" data-user-id="${escapeHtml(profile.id)}">${escapeHtml(friendActionLabel(profile, sets))}</button>
+          </div>
+        `}
+      </article>
+      ${state.profileDetailsError ? `<div class="auth-error" role="alert">${escapeHtml(state.profileDetailsError)}</div>` : ''}
+      <div class="section-row section-row--tight">
+        <h2 class="section-title">Badges</h2>
+      </div>
+      ${loading ? '<div class="empty-state">Loading badges...</div>' : renderProfileBadgePills(details)}
+      <div class="section-row section-row--tight">
+        <h2 class="section-title">Recent do visits</h2>
+      </div>
+      ${loading ? '<div class="empty-state">Loading visits...</div>' : renderProfileVisitList(profileId, details)}
+    `;
+    return renderModalShell(
+      profile?.displayName || 'Profile',
+      viewingOwn ? 'Your visible bathroom stats.' : 'Visible bathroom stats, badges and recent visits.',
+      body,
+      'modal--profile'
+    );
   }
 
   function bindEvents() {
@@ -1718,6 +1908,14 @@
       case 'open-notifications':
         setState({ modal: 'notifications' });
         break;
+      case 'open-profile':
+        {
+          const profileId = element.dataset.profileId;
+          if (!profileId) return;
+          setState({ modal: 'profileView', selectedProfileId: profileId, profileDetailsError: '' });
+          await loadProfileDetails(profileId);
+        }
+        break;
       case 'open-auth':
         setState({ modal: 'auth', authError: '', authNotice: '', authSubmitting: false });
         break;
@@ -1728,6 +1926,9 @@
           authNotice: '',
           authSubmitting: false
         });
+        break;
+      case 'sign-in-google':
+        await signInWithGoogle();
         break;
       case 'sync-supabase':
         await syncSupabase();
@@ -2417,6 +2618,40 @@
     }
   }
 
+  async function loadProfileDetails(profileId) {
+    if (!profileId || !API?.isConfigured?.()) return;
+    if (state.profileDetailsById[profileId]) return;
+    state = { ...state, profileDetailsLoadingId: profileId, profileDetailsError: '' };
+    render();
+    try {
+      const [checkins, badges] = await Promise.all([
+        (API.listProfileCheckins || API.listMyCheckins)(profileId),
+        API.listUserBadges(profileId)
+      ]);
+      state = {
+        ...state,
+        profileDetailsById: {
+          ...state.profileDetailsById,
+          [profileId]: {
+            checkins,
+            badges,
+            loadedAt: new Date().toISOString()
+          }
+        },
+        profileDetailsLoadingId: null,
+        profileDetailsError: ''
+      };
+      render();
+    } catch (error) {
+      state = {
+        ...state,
+        profileDetailsLoadingId: null,
+        profileDetailsError: errorMessage(error, 'Profile could not be loaded.')
+      };
+      render();
+    }
+  }
+
   async function refreshFriends(options = {}) {
     if (!state.authUser) {
       setState({ profiles: [], follows: [], friendQuery: '' });
@@ -2477,6 +2712,8 @@
   function authErrorMessage(error, mode) {
     const message = String(error?.message || 'Authentication failed.');
     const lower = message.toLowerCase();
+    if (lower.includes('provider') && lower.includes('not enabled')) return 'Google login is not enabled in Supabase yet.';
+    if (lower.includes('redirect') && lower.includes('not allowed')) return 'This URL is not allowed in Supabase auth redirect settings.';
     if (lower.includes('invalid login credentials')) return 'Email or password is incorrect.';
     if (lower.includes('email not confirmed')) return 'Confirm your email before signing in.';
     if (lower.includes('user already registered') || lower.includes('already registered')) return 'That email already has an account. Sign in instead.';
@@ -2487,6 +2724,24 @@
         : 'Your account is signed in, but profile access is blocked by Supabase policy.';
     }
     return message;
+  }
+
+  async function signInWithGoogle() {
+    if (!API?.isConfigured?.()) return;
+    setState({
+      authError: '',
+      authNotice: 'Opening Google sign-in...',
+      authSubmitting: true
+    });
+    try {
+      await API.signInWithGoogle();
+    } catch (error) {
+      setState({
+        authSubmitting: false,
+        authNotice: '',
+        authError: authErrorMessage(error, 'oauth')
+      });
+    }
   }
 
   async function handleAuthSubmit(event) {

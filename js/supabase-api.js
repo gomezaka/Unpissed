@@ -81,6 +81,63 @@
     }
   }
 
+  function redirectToUrl() {
+    const url = new URL(window.location.href);
+    url.hash = '';
+    ['access_token', 'expires_at', 'expires_in', 'provider_token', 'refresh_token', 'token_type', 'type'].forEach((key) => {
+      url.searchParams.delete(key);
+    });
+    return url.toString();
+  }
+
+  function cleanAuthUrl() {
+    if (!window.history?.replaceState) return;
+    const url = new URL(window.location.href);
+    const hashParams = new URLSearchParams(url.hash.startsWith('#') ? url.hash.slice(1) : url.hash);
+    const hasAuthHash = hashParams.has('access_token') || hashParams.has('refresh_token');
+    if (!hasAuthHash) return;
+    url.hash = '';
+    window.history.replaceState({}, document.title, url.toString());
+  }
+
+  async function getUserForAccessToken(accessToken) {
+    if (!accessToken) return null;
+    const response = await fetchWithTimeout(`${config.SUPABASE_URL}/auth/v1/user`, {
+      headers: {
+        apikey: config.SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json'
+      }
+    });
+    const result = await readResponse(response, true);
+    if (result.error) throw result.error;
+    return result.data;
+  }
+
+  async function detectRestOAuthSessionFromUrl() {
+    const hash = window.location.hash?.startsWith('#') ? window.location.hash.slice(1) : '';
+    if (!hash) return getStoredSession();
+    const params = new URLSearchParams(hash);
+    const accessToken = params.get('access_token');
+    if (!accessToken) return getStoredSession();
+
+    const expiresIn = Number(params.get('expires_in') || 0);
+    const expiresAt = Number(params.get('expires_at') || 0) ||
+      (expiresIn ? Math.floor(Date.now() / 1000) + expiresIn : 0);
+    const session = {
+      access_token: accessToken,
+      refresh_token: params.get('refresh_token') || '',
+      provider_token: params.get('provider_token') || '',
+      token_type: params.get('token_type') || 'bearer',
+      expires_in: expiresIn || undefined,
+      expires_at: expiresAt || undefined,
+      user: await getUserForAccessToken(accessToken)
+    };
+    setStoredSession(session);
+    cleanAuthUrl();
+    return session;
+  }
+
   function authHeaders(extra = {}) {
     const session = getStoredSession();
     return {
@@ -219,8 +276,20 @@
     return {
       auth: {
         async getSession() {
-          const session = getStoredSession();
+          const session = await detectRestOAuthSessionFromUrl();
           return { data: { session }, error: null };
+        },
+        async signInWithOAuth({ provider, options = {} }) {
+          const redirectTo = options.redirectTo || redirectToUrl();
+          const url = new URL(`${config.SUPABASE_URL}/auth/v1/authorize`);
+          url.searchParams.set('provider', provider);
+          url.searchParams.set('redirect_to', redirectTo);
+          if (options.scopes) url.searchParams.set('scopes', options.scopes);
+          Object.entries(options.queryParams || {}).forEach(([key, value]) => {
+            if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, value);
+          });
+          window.location.assign(url.toString());
+          return { data: { url: url.toString(), provider }, error: null };
         },
         async signInWithPassword({ email, password }) {
           const response = await fetchWithTimeout(`${config.SUPABASE_URL}/auth/v1/token?grant_type=password`, {
@@ -513,6 +582,23 @@
     return data;
   }
 
+  async function signInWithGoogle() {
+    const supabase = getClient();
+    if (!supabase) throw new Error('Supabase is not configured.');
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: redirectToUrl(),
+        queryParams: {
+          access_type: 'offline',
+          prompt: 'select_account'
+        }
+      }
+    });
+    if (error) throw error;
+    return data;
+  }
+
   async function signUp(email, password, displayName) {
     const supabase = getClient();
     if (!supabase) throw new Error('Supabase is not configured.');
@@ -540,10 +626,13 @@
   async function ensureProfile(user, displayName = '') {
     const supabase = getClient();
     if (!supabase || !user?.id) return null;
-    const name = displayName || user.user_metadata?.display_name || user.email?.split('@')[0] || 'Unpissed User';
+    const metadata = user.user_metadata || {};
+    const name = displayName || metadata.display_name || metadata.full_name || metadata.name || user.email?.split('@')[0] || 'Unpissed User';
+    const payload = { id: user.id, display_name: name };
+    if (metadata.avatar_url || metadata.picture) payload.avatar_url = metadata.avatar_url || metadata.picture;
     const { data, error } = await supabase
       .from('profiles')
-      .upsert({ id: user.id, display_name: name }, { onConflict: 'id' })
+      .upsert(payload, { onConflict: 'id' })
       .select('*')
       .single();
     if (error) throw error;
@@ -633,6 +722,10 @@
       .limit(50);
     if (error) throw error;
     return (data || []).map(normalizeCheckin);
+  }
+
+  async function listProfileCheckins(userId) {
+    return listMyCheckins(userId);
   }
 
   async function listReviews(bathroomId) {
@@ -935,6 +1028,7 @@
     getClient,
     getSession,
     signIn,
+    signInWithGoogle,
     signUp,
     signOut,
     ensureProfile,
@@ -943,6 +1037,7 @@
     listUserBadges,
     unlockBadge,
     listMyCheckins,
+    listProfileCheckins,
     listReviews,
     listFeedEvents,
     listProfiles,
