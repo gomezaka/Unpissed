@@ -774,14 +774,17 @@
     const missing = state.backendStatus === 'missing';
     const failed = state.backendStatus === 'error';
     const tone = signedIn ? 'live' : ((missing || failed) ? 'missing' : 'ready');
-    const label = signedIn ? 'Supabase live' : (failed ? 'Supabase error' : (missing ? 'Setup required' : 'Supabase ready'));
+    const label = signedIn ? 'Signed in' : (failed ? 'Connection issue' : (missing ? 'Setup required' : 'Ready'));
+    const message = signedIn
+      ? 'Your account is active and data is saved across devices.'
+      : (state.syncMessage || '');
     const action = signedIn ? 'sync-supabase' : ((failed || missing) ? 'retry-startup' : 'open-auth');
-    const buttonLabel = signedIn ? 'Sync' : ((failed || missing) ? 'Retry' : 'Sign in');
+    const buttonLabel = signedIn ? 'Refresh' : ((failed || missing) ? 'Retry' : 'Sign in');
     return `
       <section class="backend-strip backend-strip--${tone}">
         <div>
           <b>${escapeHtml(label)}</b>
-          <span>${escapeHtml(state.syncMessage || '')}</span>
+          <span>${escapeHtml(message)}</span>
         </div>
         <button class="backend-strip__button" data-action="${action}">
           ${buttonLabel}
@@ -1579,7 +1582,7 @@
         </div>
         <article class="simple-card">
           <h3>${escapeHtml(currentDisplayName())}</h3>
-          <p>${state.authUser ? 'Signed in with Supabase' : 'Sign in to save check-ins, photos and badge progress.'} · Anonymous mode ${state.anonymous ? 'on' : 'off'}${best ? ` · Best nearby: ${escapeHtml(best.name)}` : ''}</p>
+          <p>${state.authUser ? 'Signed in' : 'Sign in to save check-ins, photos and badge progress.'} · Anonymous mode ${state.anonymous ? 'on' : 'off'}${best ? ` · Best nearby: ${escapeHtml(best.name)}` : ''}</p>
           <div style="height:12px"></div>
           <button class="secondary-button full-width" data-action="open-auth">${state.authUser ? 'Account settings' : 'Sign in'}</button>
         </article>
@@ -1868,11 +1871,11 @@
           <p>${escapeHtml(state.authUser.email || '')}</p>
         </article>
         <div style="height:12px"></div>
-        <button class="primary-button full-width" data-action="sync-supabase">Sync data</button>
+        <button class="primary-button full-width" data-action="sync-supabase">Refresh data</button>
         <div style="height:10px"></div>
         <button class="secondary-button full-width" data-action="sign-out">Sign out</button>
       `;
-      return renderModalShell('Account', 'Supabase session is active.', body);
+      return renderModalShell('Account', 'You are signed in.', body);
     }
 
     const mode = state.authMode === 'signup' ? 'signup' : 'signin';
