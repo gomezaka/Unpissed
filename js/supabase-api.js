@@ -10,6 +10,7 @@
   ]);
   let client = null;
   const REST_SESSION_KEY = `unpissed.supabase.${config.SUPABASE_URL || 'local'}.session`;
+  const SESSION_EXPIRY_SKEW_MS = 60000;
 
   function cleanValue(value) {
     return String(value || '').trim();
@@ -53,13 +54,26 @@
     };
   }
 
-  function getStoredSession() {
+  function sessionExpiresAtMs(session) {
+    const expiresAt = Number(session?.expires_at || 0);
+    if (expiresAt) return expiresAt * 1000;
+    const expiresIn = Number(session?.expires_in || 0);
+    if (!expiresIn) return 0;
+    return Date.now() + expiresIn * 1000;
+  }
+
+  function isSessionExpired(session, skewMs = SESSION_EXPIRY_SKEW_MS) {
+    const expiresAtMs = sessionExpiresAtMs(session);
+    return Boolean(expiresAtMs && expiresAtMs < Date.now() + skewMs);
+  }
+
+  function getStoredSession(options = {}) {
     try {
       const raw = window.localStorage?.getItem(REST_SESSION_KEY);
       if (!raw) return null;
       const session = JSON.parse(raw);
       if (!session?.access_token) return null;
-      if (session.expires_at && Number(session.expires_at) * 1000 < Date.now() - 30000) {
+      if (!options.allowExpired && isSessionExpired(session, -30000)) {
         window.localStorage?.removeItem(REST_SESSION_KEY);
         return null;
       }
@@ -75,7 +89,11 @@
         window.localStorage?.removeItem(REST_SESSION_KEY);
         return;
       }
-      window.localStorage?.setItem(REST_SESSION_KEY, JSON.stringify(session));
+      const sessionToStore = { ...session };
+      if (!sessionToStore.expires_at && sessionToStore.expires_in) {
+        sessionToStore.expires_at = Math.floor(Date.now() / 1000) + Number(sessionToStore.expires_in);
+      }
+      window.localStorage?.setItem(REST_SESSION_KEY, JSON.stringify(sessionToStore));
     } catch {
       // Auth persistence is useful, but the app can continue without it.
     }
@@ -84,7 +102,8 @@
   function redirectToUrl() {
     const url = new URL(window.location.href);
     url.hash = '';
-    ['access_token', 'expires_at', 'expires_in', 'provider_token', 'refresh_token', 'token_type', 'type'].forEach((key) => {
+    url.pathname = url.pathname.replace(/\/index\.html$/i, '/');
+    ['access_token', 'code', 'error', 'error_code', 'error_description', 'expires_at', 'expires_in', 'provider_token', 'refresh_token', 'token_type', 'type'].forEach((key) => {
       url.searchParams.delete(key);
     });
     return url.toString();
@@ -114,12 +133,58 @@
     return result.data;
   }
 
+  async function hydrateSessionUser(session) {
+    if (!session?.access_token || session.user) return session;
+    return {
+      ...session,
+      user: await getUserForAccessToken(session.access_token)
+    };
+  }
+
+  async function refreshStoredSession(session) {
+    if (!session?.refresh_token) return null;
+    const response = await fetchWithTimeout(`${config.SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: {
+        apikey: config.SUPABASE_ANON_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ refresh_token: session.refresh_token })
+    });
+    const result = await readResponse(response);
+    if (result.error) {
+      if ([400, 401, 403].includes(Number(result.error.status))) setStoredSession(null);
+      throw result.error;
+    }
+    const refreshed = {
+      ...session,
+      ...result.data
+    };
+    if (!refreshed.expires_at && refreshed.expires_in) {
+      refreshed.expires_at = Math.floor(Date.now() / 1000) + Number(refreshed.expires_in);
+    }
+    const hydrated = await hydrateSessionUser(refreshed);
+    setStoredSession(hydrated);
+    return hydrated;
+  }
+
+  async function getUsableStoredSession() {
+    const session = getStoredSession({ allowExpired: true });
+    if (!session) return null;
+    if (!isSessionExpired(session)) return hydrateSessionUser(session);
+    if (!session.refresh_token) {
+      setStoredSession(null);
+      return null;
+    }
+    return refreshStoredSession(session);
+  }
+
   async function detectRestOAuthSessionFromUrl() {
     const hash = window.location.hash?.startsWith('#') ? window.location.hash.slice(1) : '';
-    if (!hash) return getStoredSession();
+    if (!hash) return getUsableStoredSession();
     const params = new URLSearchParams(hash);
     const accessToken = params.get('access_token');
-    if (!accessToken) return getStoredSession();
+    if (!accessToken) return getUsableStoredSession();
 
     const expiresIn = Number(params.get('expires_in') || 0);
     const expiresAt = Number(params.get('expires_at') || 0) ||
@@ -138,8 +203,13 @@
     return session;
   }
 
-  function authHeaders(extra = {}) {
-    const session = getStoredSession();
+  async function authHeaders(extra = {}) {
+    let session = null;
+    try {
+      session = await getUsableStoredSession();
+    } catch {
+      session = getStoredSession({ allowExpired: true });
+    }
     return {
       apikey: config.SUPABASE_ANON_KEY,
       Authorization: `Bearer ${session?.access_token || config.SUPABASE_ANON_KEY}`,
@@ -264,7 +334,7 @@
     async execute() {
       const url = new URL(`${config.SUPABASE_URL}/rest/v1/${this.table}`);
       this.params.forEach((value, key) => url.searchParams.set(key, value));
-      const headers = authHeaders({
+      const headers = await authHeaders({
         Accept: this.singleRow ? 'application/vnd.pgrst.object+json' : 'application/json',
         ...this.headers
       });
@@ -353,7 +423,7 @@
       async rpc(name, payload = {}) {
         const response = await fetchWithTimeout(`${config.SUPABASE_URL}/rest/v1/rpc/${name}`, {
           method: 'POST',
-          headers: authHeaders({
+          headers: await authHeaders({
             Accept: 'application/json',
             'Content-Type': 'application/json'
           }),
@@ -365,7 +435,7 @@
         from(bucket) {
           return {
             async upload(path, file, options = {}) {
-              const headers = authHeaders({
+              const headers = await authHeaders({
                 'Cache-Control': options.cacheControl || '3600',
                 'x-upsert': options.upsert ? 'true' : 'false',
                 'Content-Type': file?.type || 'application/octet-stream'

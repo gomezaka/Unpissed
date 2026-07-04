@@ -226,8 +226,9 @@
   }
 
   async function waitForSupabaseLibrary() {
-    if (API?.isConfigured?.()) return true;
-    if (getConfigurationStatus().reason !== 'missing-library') return false;
+    const setup = getConfigurationStatus();
+    if (!setup.ok) return false;
+    if (window.supabase?.createClient) return true;
     if (window.UnpissedSupabaseVendorReady?.then) {
       await Promise.race([
         window.UnpissedSupabaseVendorReady.catch(() => false),

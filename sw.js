@@ -1,4 +1,4 @@
-const CACHE_NAME = 'unpissed-v0.6.1.9.4';
+const CACHE_NAME = 'unpissed-v0.6.1.9.5';
 const ASSETS = [
   './',
   './index.html',
@@ -42,8 +42,19 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const requestUrl = new URL(event.request.url);
   const isAppAsset = requestUrl.origin === self.location.origin;
+  const isNavigation = event.request.mode === 'navigate';
   event.respondWith(
     caches.open(CACHE_NAME).then(async (cache) => {
+      if (isAppAsset && isNavigation) {
+        try {
+          const fresh = await fetch(event.request);
+          cache.put('./index.html', fresh.clone());
+          return fresh;
+        } catch {
+          const cached = await caches.match('./index.html');
+          return cached || caches.match('./');
+        }
+      }
       if (isAppAsset) {
         try {
           const fresh = await fetch(event.request);

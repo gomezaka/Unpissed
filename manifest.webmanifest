@@ -2,7 +2,7 @@
   "name": "Unpissed",
   "short_name": "Unpissed",
   "description": "Find the throne before it's too late.",
-  "start_url": "./index.html",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#10131c",
   "theme_color": "#4e7dff",
